@@ -1,0 +1,3 @@
+mandrael_contao_confirm_member_email_change:
+    resource: ../src/Controller
+    type: attribute

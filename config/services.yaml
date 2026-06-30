@@ -1,0 +1,16 @@
+services:
+    _defaults:
+        autowire: true
+        autoconfigure: true
+        bind:
+            $jumpTo: '%mandrael_contao_confirm_member_email_change.jump_to%'
+
+    Mandrael\ContaoConfirmMemberEmailChangeBundle\:
+        resource: '../src/'
+        exclude:
+            - '../src/MandraelContaoConfirmMemberEmailChangeBundle.php'
+            - '../src/ContaoManager/'
+
+    # Resolved from the container as a DCA callback → must be public.
+    Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener:
+        public: true

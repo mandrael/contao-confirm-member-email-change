@@ -1,0 +1,59 @@
+{
+    "name": "mandrael/contao-confirm-member-email-change",
+    "type": "contao-bundle",
+    "description": "Bestätigt die Änderung der E-Mail-Adresse eines Frontend-Mitglieds per Double-Opt-In-Link (Contao 5.3+).",
+    "keywords": ["contao", "member", "email", "double opt-in", "confirm", "tl_member", "email change", "verification"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Michael Gasperl",
+            "email": "michael@gasperl.at"
+        }
+    ],
+    "support": {
+        "issues": "https://github.com/mandrael/contao-confirm-member-email-change/issues",
+        "source": "https://github.com/mandrael/contao-confirm-member-email-change"
+    },
+    "require": {
+        "php": "^8.1",
+        "contao/core-bundle": "^5.3",
+        "symfony/config": "^6.4 || ^7.0",
+        "symfony/dependency-injection": "^6.4 || ^7.0",
+        "symfony/http-foundation": "^6.4 || ^7.0",
+        "symfony/http-kernel": "^6.4 || ^7.0",
+        "symfony/routing": "^6.4 || ^7.0",
+        "symfony/translation-contracts": "^2.5 || ^3.0"
+    },
+    "require-dev": {
+        "contao/manager-plugin": "^2.0",
+        "contao/test-case": "^5.0",
+        "phpunit/phpunit": "^11.5 || ^12.4",
+        "phpstan/phpstan": "^2.0"
+    },
+    "conflict": {
+        "contao/manager-plugin": "<2.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Mandrael\\ContaoConfirmMemberEmailChangeBundle\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Mandrael\\ContaoConfirmMemberEmailChangeBundle\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "contao/manager-plugin": true,
+            "contao-components/installer": true
+        }
+    },
+    "extra": {
+        "contao-manager-plugin": "Mandrael\\ContaoConfirmMemberEmailChangeBundle\\ContaoManager\\Plugin"
+    },
+    "suggest": {
+        "terminal42/contao-mailusername": "Login mit der E-Mail-Adresse als Benutzername; dieses Bundle hält den Benutzernamen bei einer bestätigten E-Mail-Änderung synchron (empfohlen).",
+        "heimrichhannot/contao-email2username-bundle": "Alternative für Login mit der E-Mail-Adresse; ebenfalls voll kompatibel (entweder/oder zu terminal42, nicht beide)."
+    }
+}

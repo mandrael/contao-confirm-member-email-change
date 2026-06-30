@@ -1,0 +1,8 @@
+parameters:
+    level: 5
+    paths:
+        - src
+    # Contao models/users expose columns via magic __get/__set.
+    reportUnmatchedIgnoredErrors: false
+    ignoreErrors:
+        - '#Access to an undefined property#'
