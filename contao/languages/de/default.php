@@ -19,3 +19,11 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['expired'] = 'Dieser Bestätigu
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['alreadyConfirmed'] = 'Diese E-Mail-Änderung wurde bereits bestätigt.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['invalid'] = 'Der Bestätigungslink ist ungültig.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['taken'] = 'Diese E-Mail-Adresse wird inzwischen bereits von einem anderen Konto verwendet.';
+
+// Titles + link for the self-contained confirmation page
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['successTitle'] = 'E-Mail-Adresse bestätigt';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['errorTitle'] = 'Bestätigung nicht möglich';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Zur Startseite';
+
+// Ersetzt Contaos generische Unique-Meldung im FE-Profil
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'Diese E-Mail-Adresse existiert bereits.';

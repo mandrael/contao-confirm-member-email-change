@@ -19,3 +19,11 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['expired'] = 'This confirmation
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['alreadyConfirmed'] = 'This email change has already been confirmed.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['invalid'] = 'The confirmation link is invalid.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['taken'] = 'This email address is meanwhile already in use by another account.';
+
+// Titles + link for the self-contained confirmation page
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['successTitle'] = 'Email address confirmed';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['errorTitle'] = 'Confirmation not possible';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Back to the homepage';
+
+// Replaces Contao's generic uniqueness error in the FE profile
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'This email address already exists.';

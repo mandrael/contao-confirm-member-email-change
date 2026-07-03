@@ -11,6 +11,7 @@ use Contao\ModulePersonalData;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
@@ -31,6 +32,7 @@ class EmailChangeListenerTest extends TestCase
             $this->createStub(ContaoFramework::class),
             $this->createStub(TranslatorInterface::class),
             $this->createStub(UrlGeneratorInterface::class),
+            $this->createStub(RequestStack::class),
         );
 
         $user = $this->createStub(FrontendUser::class);

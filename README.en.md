@@ -37,14 +37,10 @@ a confirmation link. Closes a gap acknowledged by the Contao core team itself
 composer require mandrael/contao-confirm-member-email-change
 ```
 
-The bundle registers itself via the Contao Manager Plugin. Optional target page for the
-success/error message (defaults to the site root):
-
-```yaml
-# config/config.yaml
-mandrael_contao_confirm_member_email_change:
-    jump_to: 42   # page ID
-```
+The bundle registers itself via the Contao Manager Plugin — **no further configuration
+needed**. After clicking the confirmation link the member sees a short confirmation page.
+If an email login is active (see below), they are logged out in the process and then sign in
+with the new address.
 
 ## Compatibility: email as username
 

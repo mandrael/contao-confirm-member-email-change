@@ -4,3 +4,11 @@
 /.phpunit.cache/
 /.php-cs-fixer.cache
 .DS_Store
+
+# Local cont5 manual-test artefacts (never published)
+/cont5-test-helper.php
+/TESTANLEITUNG.md
+
+# Local Playwright / screenshot artefacts (never published)
+/.playwright-mcp/
+/*.png

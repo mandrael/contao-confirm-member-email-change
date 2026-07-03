@@ -37,14 +37,10 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
 composer require mandrael/contao-confirm-member-email-change
 ```
 
-Das Bundle registriert sich über den Contao Manager Plugin automatisch. Optionale Zielseite
-für die Erfolgs-/Fehlermeldung (sonst Startseite):
-
-```yaml
-# config/config.yaml
-mandrael_contao_confirm_member_email_change:
-    jump_to: 42   # Seiten-ID
-```
+Das Bundle registriert sich über den Contao Manager Plugin automatisch — **keine weitere
+Konfiguration nötig**. Nach dem Klick auf den Bestätigungslink sieht das Mitglied eine kurze
+Bestätigungsseite. Ist ein E-Mail-Login aktiv (siehe unten), wird es dabei abgemeldet und
+meldet sich anschließend mit der neuen Adresse an.
 
 ## Kompatibilität: E-Mail als Benutzername
 

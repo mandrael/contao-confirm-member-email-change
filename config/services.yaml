@@ -2,8 +2,6 @@ services:
     _defaults:
         autowire: true
         autoconfigure: true
-        bind:
-            $jumpTo: '%mandrael_contao_confirm_member_email_change.jump_to%'
 
     Mandrael\ContaoConfirmMemberEmailChangeBundle\:
         resource: '../src/'

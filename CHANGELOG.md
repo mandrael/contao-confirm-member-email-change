@@ -11,10 +11,13 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
   (`ModulePersonalData`): `fields.email.save`-Callback (Priorität 255) fängt die Änderung ab,
   Core-`OptIn`-Token + Bestätigungslink an die neue Adresse, Sicherheits-Benachrichtigung an
   die alte Adresse, `tl_member.email` ändert sich erst nach Bestätigung.
-- Bestätigungs-Controller (`#[AsController]` + `#[Route]`) inkl. abgelaufener/bereits-bestätigter
-  Token-Behandlung und Confirm-Zeit-Unique-Prüfung der neuen Adresse.
+- Bestätigungs-Controller (`#[AsController]` + `#[Route]`): bestätigt den Token, schreibt die neue
+  Adresse und zeigt eine **eigenständige Bestätigungsseite** (kein Redirect auf eine Theme-Seite,
+  deren Module an der gerade geänderten Login-Identität scheitern könnten). Behandelt abgelaufene/
+  bereits-bestätigte/ungültige Token und prüft die Eindeutigkeit der neuen Adresse zur Confirm-Zeit.
+- Klarer FE-Hinweis im Profilmodul beim Speichern („Bestätigungslink an … gesendet" statt „gespeichert").
 - Kompatibilität mit E-Mail-als-Username-Erweiterungen: Benutzername-Sync beim Bestätigen für
   `terminal42/contao-mailusername` (verbatim, Pflicht) bzw. `heimrichhannot/contao-email2username-bundle`
-  (lowercase, kosmetisch). Ohne Erweiterung bleibt `username` unangetastet.
-- Optionale `jump_to`-Zielseite für die Erfolgs-/Fehlermeldung.
+  (lowercase, kosmetisch). Ohne Erweiterung bleibt `username` unangetastet. Ändert sich der Benutzername,
+  wird das Mitglied abgemeldet, damit es sich mit der neuen Adresse neu anmeldet.
 - Deutsche und englische Sprachdateien.

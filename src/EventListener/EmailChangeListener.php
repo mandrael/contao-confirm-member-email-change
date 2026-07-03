@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener;
 
+use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\DependencyInjection\Attribute\AsCallback;
+use Contao\CoreBundle\DependencyInjection\Attribute\AsHook;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\Email;
 use Contao\FrontendUser;
-use Contao\Message;
 use Contao\ModulePersonalData;
 use Contao\OptInModel;
+use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
@@ -35,6 +37,7 @@ class EmailChangeListener
         private readonly ContaoFramework $framework,
         private readonly TranslatorInterface $translator,
         private readonly UrlGeneratorInterface $urlGenerator,
+        private readonly RequestStack $requestStack,
     ) {
     }
 
@@ -77,12 +80,40 @@ class EmailChangeListener
         // Security: tell the OLD address that a change was requested.
         $this->notifyOldAddress($oldEmail, $newEmail);
 
-        $this->framework->getAdapter(Message::class)->addConfirmation(
-            \sprintf($this->trans('confirmEmailChange.pending'), $newEmail),
+        // Make ModulePersonalData's success message reflect the pending state.
+        // The module renders MSC.savedData raw after a successful submit (and then
+        // reloads), so overriding it here (this callback runs before that) replaces
+        // the misleading "your data was saved" with a prominent light-green notice
+        // that the email change still needs confirmation.
+        $notice = \sprintf($this->trans('confirmEmailChange.pending'), $newEmail);
+        $GLOBALS['TL_LANG']['MSC']['savedData'] = \sprintf(
+            '<span style="display:block;margin:.5em 0;padding:14px 18px;background:#dcfce7;border:2px solid #22c55e;border-radius:8px;color:#14532d;font-weight:600;line-height:1.5;">✓ %s</span>',
+            htmlspecialchars($notice, ENT_QUOTES, 'UTF-8'),
         );
 
         // Keep the old address until the new one is confirmed → suppresses the write.
         return $oldEmail;
+    }
+
+    /**
+     * On the front end, replace Contao's generic "this entry already exists" unique
+     * error with an email-specific one — on the profile form the only editable unique
+     * field is the email address. The back end keeps the generic message.
+     */
+    #[AsHook('loadLanguageFile')]
+    public function onLoadLanguageFile(string $name): void
+    {
+        if ('default' !== $name) {
+            return;
+        }
+
+        if (ContaoCoreBundle::SCOPE_FRONTEND !== $this->requestStack->getMainRequest()?->attributes->get('_scope')) {
+            return;
+        }
+
+        if (isset($GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'])) {
+            $GLOBALS['TL_LANG']['ERR']['unique'] = $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'];
+        }
     }
 
     private function purgePendingTokens(int $memberId): void
