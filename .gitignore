@@ -12,3 +12,6 @@
 # Local Playwright / screenshot artefacts (never published)
 /.playwright-mcp/
 /*.png
+
+# Local cont5 dev/verification scripts + implementation plan (never published)
+/.cont5-dev/
