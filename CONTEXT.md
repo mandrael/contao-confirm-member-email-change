@@ -1,9 +1,10 @@
 # contao-confirm-member-email-change — Kontext & Handover
 
-> **Kaltstart-Dokument.** Hier steht alles, was bisher recherchiert/entschieden wurde.
-> Brainstorming-Fragen sind entschieden (§6). Nächste Session: direkt
-> `superpowers:writing-plans` → Implementierungsplan (nur B4 technisch verifizieren).
-> **Noch kein Code geschrieben.** Stand: 2026-06-30.
+> **Kontext-/Handover-Dokument.** Recherche, Entscheidungen und Rationale (§1–§9) gelten weiter.
+> **Status: implementiert, auf cont5 (Contao 5.3.47) end-to-end verifiziert, nach GitHub gepusht**
+> (`dev-main`). Offen vor dem Tag: Code-Review + optionaler 5.7-Runtime-Smoke → dann `v1.0.0` + Packagist.
+> Aktuelle nutzerseitige Doku: `README.md` / `README.en.md` / `CHANGELOG.md`. Stand: 2026-07-05.
+> (Historie: bis 2026-06-30 reine Planungsphase; siehe §10.)
 
 ## 1. Zweck & Scope
 
@@ -156,9 +157,21 @@ deprecation-frei schreiben → läuft unverändert auf SF 7.4.
 - Core-Code Prod 5.3.47 (ModulePersonalData/ModuleRegistration/OptIn/User) — Fundstellen §4/§5
 - Versions-Constraints: core-bundle/composer.json @ Tags 4.13.58 / Branches 5.3 / 5.7
 
-## 10. Nächste Schritte
+## 10. Stand & nächste Schritte (Update 2026-07-05)
 
-1. **Diese Session:** Doku abgelegt, B1–B7 entschieden (§6), `git init` + Commit. ✔
-2. **Nächste Session:** direkt `superpowers:writing-plans` → Implementierungsplan (`plan.md`).
-   (Brainstorming entfällt — Entscheidungen stehen; nur B4 im Plan technisch verifizieren.)
-3. Erst danach Code (Bundle-Skeleton via `AbstractBundle`).
+**Erledigt.** Bundle implementiert (AbstractBundle + Attribut-DI, `#[AsCallback]`/`#[AsController]`/`#[AsHook]`).
+Auf cont5 (Contao 5.3.47, PHP 8.3) end-to-end verifiziert — inkl. terminal42/heimrichhannot/ohne-Erweiterung,
+grüner Pending-Box, self-contained Bestätigungsseite + `Security::logout()` bei Identitätswechsel und
+E-Mail-spezifischer Unique-Meldung (FE-only). PHPUnit + PHPStan (auch gegen `core-bundle 5.7.7`) grün,
+GitHub-Actions-CI eingerichtet. Nach GitHub gepusht (`dev-main`, Commit-Identität
+`Michael Gasperl <michael@gasperl.at>`, kein Co-Author/keine Session-URL). cont5 zieht `dev-main` via VCS.
+Die relevanten `ModulePersonalData`-Interna (savedData-Flash, Raw-Message-Template, Unique-Check) sind in
+5.7.7 identisch zu 5.3 → 5.7-Runtime-Risiko gering.
+
+**Offen vor dem Tag.**
+1. Code-Review (Fable/Codex + optional eingebautes `/code-review`) → Findings einarbeiten.
+2. Optional: 5.7-Runtime-Smoke-Test (ddev/colima).
+3. Dann `v1.0.0` taggen + bei Packagist eintragen (Empfehlung 1.0.0; konservativ 0.1.0).
+
+Historie (Planungsphase, bis 2026-06-30): Doku abgelegt, B1–B7 entschieden (§6), Implementierungsplan,
+dann Code. Brainstorming-Entscheidungen stehen unverändert in §6/§8.

@@ -15,7 +15,11 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
   Adresse und zeigt eine **eigenständige Bestätigungsseite** (kein Redirect auf eine Theme-Seite,
   deren Module an der gerade geänderten Login-Identität scheitern könnten). Behandelt abgelaufene/
   bereits-bestätigte/ungültige Token und prüft die Eindeutigkeit der neuen Adresse zur Confirm-Zeit.
-- Klarer FE-Hinweis im Profilmodul beim Speichern („Bestätigungslink an … gesendet" statt „gespeichert").
+- Klarer FE-Hinweis im Profilmodul beim Speichern: auffällige hellgrüne Box
+  („✓ Bestätigungslink an … gesendet …" statt des irreführenden „gespeichert").
+- Ersetzt Contaos generische Unique-Meldung im FE-Profil durch eine E-Mail-spezifische
+  („Diese E-Mail-Adresse existiert bereits." statt „Dieser Eintrag ist bereits vorhanden!");
+  das Backend behält die generische Meldung.
 - Kompatibilität mit E-Mail-als-Username-Erweiterungen: Benutzername-Sync beim Bestätigen für
   `terminal42/contao-mailusername` (verbatim, Pflicht) bzw. `heimrichhannot/contao-email2username-bundle`
   (lowercase, kosmetisch). Ohne Erweiterung bleibt `username` unangetastet. Ändert sich der Benutzername,

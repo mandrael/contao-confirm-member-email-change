@@ -27,9 +27,12 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
 2. Ein `fields.email.save`-Callback (hohe Priorität) fängt die Änderung ab, erstellt einen
    Core-`OptIn`-Token und sendet einen Bestätigungslink an die **neue** Adresse. Die alte
    Adresse erhält eine Sicherheits-Benachrichtigung. Im Profil bleibt die **alte** Adresse
-   sichtbar (kein Lockout, Login unverändert möglich).
+   sichtbar (kein Lockout, Login unverändert möglich) — mit einem deutlichen grünen Hinweis,
+   dass die Änderung noch bestätigt werden muss.
 3. Mitglied öffnet den Link → ein schlanker Controller bestätigt den Token, schreibt die neue
-   Adresse und – falls eine E-Mail-als-Username-Erweiterung aktiv ist – zieht den Benutzernamen mit.
+   Adresse und – falls eine E-Mail-als-Username-Erweiterung aktiv ist – zieht den Benutzernamen
+   mit. Es folgt eine kurze Bestätigungsseite; bei aktivem E-Mail-Login wird das Mitglied
+   abgemeldet und meldet sich mit der neuen Adresse neu an.
 
 ## Installation
 
