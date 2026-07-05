@@ -45,6 +45,11 @@ needed**. After clicking the confirmation link the member sees a short confirmat
 If an email login is active (see below), they are logged out in the process and then sign in
 with the new address.
 
+> **Technical note:** The emails are sent via the Symfony Mailer (`Contao\Email`). If the
+> mailer is wired to Messenger — as in Contao's default setup — they go through the queue
+> asynchronously, so a worker must be running (`contao:worker` or `messenger:consume`),
+> otherwise the emails stay queued. With a synchronous mailer transport this does not apply.
+
 ## Compatibility: email as username
 
 It is **either/or** – both extensions solve the same task and are **not** installed together:

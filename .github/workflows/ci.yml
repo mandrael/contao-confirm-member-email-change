@@ -27,7 +27,7 @@ jobs:
               run: find . -path ./vendor -prune -o -name '*.php' -print0 | xargs -0 -n1 php -l
 
     tests:
-        name: Tests + PHPStan (PHP 8.3)
+        name: Tests + PHPStan (Contao 5.7, PHP 8.3)
         runs-on: ubuntu-latest
         steps:
             - uses: actions/checkout@v4
@@ -42,5 +42,30 @@ jobs:
               run: composer update --no-interaction --no-progress --prefer-dist
             - name: PHPUnit
               run: vendor/bin/phpunit
+            - name: PHPStan
+              run: vendor/bin/phpstan analyse --no-progress
+
+    static-contao53:
+        # Real 5.3 coverage: contao/test-case hard-pins core-bundle to its own
+        # version and its 5.3 line needs PHPUnit 9.6 (annotation-style, incompatible
+        # with our attribute-based tests), so PHPUnit can't run against 5.3 here.
+        # Instead verify src/ statically against the actual 5.3.x API by dropping the
+        # test framework and pinning core-bundle to 5.3.
+        name: PHPStan (Contao 5.3, PHP 8.1)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: shivammathur/setup-php@v2
+              with:
+                  php-version: '8.1'
+                  coverage: none
+            - name: Pin Contao 5.3 and drop the test framework
+              run: |
+                  composer require --no-update contao/core-bundle:'5.3.*'
+                  composer remove --no-update --dev contao/test-case phpunit/phpunit
+            - name: Install dependencies
+              run: composer update --no-interaction --no-progress --prefer-dist
+            - name: Show resolved Contao version
+              run: composer show contao/core-bundle | grep versions
             - name: PHPStan
               run: vendor/bin/phpstan analyse --no-progress

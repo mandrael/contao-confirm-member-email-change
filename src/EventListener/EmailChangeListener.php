@@ -107,7 +107,16 @@ class EmailChangeListener
             return;
         }
 
-        if (ContaoCoreBundle::SCOPE_FRONTEND !== $this->requestStack->getMainRequest()?->attributes->get('_scope')) {
+        $request = $this->requestStack->getMainRequest();
+
+        if (ContaoCoreBundle::SCOPE_FRONTEND !== $request?->attributes->get('_scope')) {
+            return;
+        }
+
+        // Only for the personal-data module submit (FORM_SUBMIT = "tl_member_<id>").
+        // Other frontend forms with a unique field — notably registration with a
+        // duplicate username ("tl_registration_<id>") — must keep the generic message.
+        if (!str_starts_with((string) $request->request->get('FORM_SUBMIT'), 'tl_member_')) {
             return;
         }
 

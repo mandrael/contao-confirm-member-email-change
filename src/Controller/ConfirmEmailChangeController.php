@@ -58,12 +58,14 @@ class ConfirmEmailChangeController
             return $this->page('invalid', true);
         }
 
-        try {
-            $optInToken->confirm();
-        } catch (OptInTokenNoLongerValidException) {
-            return $this->page('expired', true);
-        } catch (OptInTokenAlreadyConfirmedException) {
+        // Non-mutating pre-checks so a token is never marked confirmed before we
+        // know the change can actually be applied (member gone / address taken).
+        if ($optInToken->isConfirmed()) {
             return $this->page('alreadyConfirmed', false);
+        }
+
+        if (!$optInToken->isValid()) {
+            return $this->page('expired', true);
         }
 
         $related = $optInToken->getRelatedRecords();
@@ -78,23 +80,39 @@ class ConfirmEmailChangeController
         }
 
         // Re-validate uniqueness at confirm time: two members could have requested
-        // the same new address while both tokens were pending.
+        // the same new address while both tokens were pending. This is a best-effort
+        // check, matching Contao's own guarantee — tl_member.email is DCA-unique but
+        // not DB-unique (core allows duplicate emails), so a rare parallel double
+        // confirm of the same address can still slip through. A DB UNIQUE constraint
+        // is deliberately not added: it would break real installs with duplicates.
         if (null !== $memberAdapter->findOneBy(['email=?', 'id!=?'], [$newEmail, $member->id])) {
             return $this->page('taken', true);
+        }
+
+        // Everything validated → now consume the token and persist. The exceptions
+        // still guard against a race between the pre-checks above and confirm().
+        try {
+            $optInToken->confirm();
+        } catch (OptInTokenNoLongerValidException) {
+            return $this->page('expired', true);
+        } catch (OptInTokenAlreadyConfirmedException) {
+            return $this->page('alreadyConfirmed', false);
         }
 
         $usernameChanged = $this->syncUsername($member, $newEmail);
         $member->email = $newEmail;
         $member->save();
 
+        $response = $this->page('success', false);
+
         // When the login identifier (username) changed, the member's current session
         // now points at a username that no longer exists → log them out so they
         // re-authenticate with the new address.
         if ($usernameChanged) {
-            $this->logoutFrontendUser();
+            $this->carryOverLogoutCookies($this->logoutFrontendUser(), $response);
         }
 
-        return $this->page('success', false);
+        return $response;
     }
 
     /**
@@ -129,13 +147,27 @@ class ConfirmEmailChangeController
         return false;
     }
 
-    private function logoutFrontendUser(): void
+    private function logoutFrontendUser(): ?Response
     {
         // The identifier changed → log the current member out via the security
         // helper so they re-authenticate with the new address. A stale session token
         // would otherwise reference a username that no longer exists.
         if ($this->security->getUser() instanceof FrontendUser) {
-            $this->security->logout(false);
+            return $this->security->logout(false);
+        }
+
+        return null;
+    }
+
+    /**
+     * logout() builds its own response carrying the cookie-clearing headers
+     * (remember-me deletion, cleared session cookie). We render our own page
+     * instead, so move those cookies onto it — otherwise they are lost.
+     */
+    private function carryOverLogoutCookies(?Response $logoutResponse, Response $response): void
+    {
+        foreach ($logoutResponse?->headers->getCookies() ?? [] as $cookie) {
+            $response->headers->setCookie($cookie);
         }
     }
 

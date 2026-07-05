@@ -45,6 +45,12 @@ Konfiguration nötig**. Nach dem Klick auf den Bestätigungslink sieht das Mitgl
 Bestätigungsseite. Ist ein E-Mail-Login aktiv (siehe unten), wird es dabei abgemeldet und
 meldet sich anschließend mit der neuen Adresse an.
 
+> **Technischer Hinweis:** Die Mails werden über den Symfony Mailer (`Contao\Email`) versendet.
+> Ist der Mailer — wie im Contao-Standard-Setup — an den Messenger angebunden, laufen sie
+> asynchron über die Queue; dann muss ein Worker laufen (`contao:worker` bzw.
+> `messenger:consume`), sonst bleiben die Mails liegen. Bei synchronem Mailer-Transport
+> entfällt das.
+
 ## Kompatibilität: E-Mail als Benutzername
 
 Es gilt **entweder/oder** – beide Erweiterungen lösen dieselbe Aufgabe und werden **nicht
