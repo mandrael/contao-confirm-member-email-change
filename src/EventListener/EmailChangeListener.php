@@ -32,6 +32,14 @@ class EmailChangeListener
      */
     private const PREFIX = 'email';
 
+    /**
+     * Pending email change stashed by onSaveEmail() and consumed by onSubmit()
+     * within the same request: [memberId, oldEmail, newEmail].
+     *
+     * @var array{0: int, 1: string, 2: string}|null
+     */
+    private ?array $pendingChange = null;
+
     public function __construct(
         private readonly OptIn $optIn,
         private readonly ContaoFramework $framework,
@@ -42,13 +50,23 @@ class EmailChangeListener
     }
 
     /**
-     * In ModulePersonalData the save_callback is invoked as ($value, $user, $module)
-     * — not with a DataContainer. Returning the OLD value suppresses the core write
-     * (guarded by `if ($varValue !== $user->$field)`).
+     * Intercepts the frontend personal-data email change.
+     *
+     * The same DCA save_callback also fires during registration (invoked as
+     * ($value, null)) and in the back end (as ($value, DataContainer)); only
+     * ModulePersonalData passes (FrontendUser, ModulePersonalData). We therefore
+     * accept a broad signature and act ONLY for the personal-data case — leaving
+     * the value untouched everywhere else (a narrow typed signature would fatal
+     * on registration/back-end saves). Returning the OLD value suppresses the
+     * core write (guarded by `if ($varValue !== $user->$field)`).
      */
     #[AsCallback(table: 'tl_member', target: 'fields.email.save', priority: 255)]
-    public function onSaveEmail(mixed $value, FrontendUser $user, ModulePersonalData $module): mixed
+    public function onSaveEmail(mixed $value, mixed $user = null, mixed $module = null): mixed
     {
+        if (!$user instanceof FrontendUser || !$module instanceof ModulePersonalData) {
+            return $value;
+        }
+
         $newEmail = (string) $value;
         $oldEmail = (string) $user->email;
 
@@ -61,24 +79,12 @@ class EmailChangeListener
         // runs (ModulePersonalData adds a widget error and skips save_callbacks),
         // so $newEmail is free among committed members at this point.
 
-        // Replace any earlier unconfirmed email-change token of this member.
-        $this->purgePendingTokens((int) $user->id);
-
-        $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [(int) $user->id]]);
-
-        $url = $this->urlGenerator->generate(
-            'mandrael_confirm_member_email_change',
-            ['token' => $token->getIdentifier()],
-            UrlGeneratorInterface::ABSOLUTE_URL,
-        );
-
-        $token->send(
-            $this->trans('confirmEmailChange.subject'),
-            \sprintf($this->trans('confirmEmailChange.text'), $url),
-        );
-
-        // Security: tell the OLD address that a change was requested.
-        $this->notifyOldAddress($oldEmail, $newEmail);
+        // Defer the actual token creation to onSubmit(): while processing the
+        // password field, ModulePersonalData deletes ALL unconfirmed opt-ins of the
+        // member. A token created here would be wiped when email and password change
+        // in the same submit. The onsubmit callback runs after every field callback,
+        // so a token created there survives the purge.
+        $this->pendingChange = [(int) $user->id, $oldEmail, $newEmail];
 
         // Make ModulePersonalData's success message reflect the pending state.
         // The module renders MSC.savedData raw after a successful submit (and then
@@ -93,6 +99,44 @@ class EmailChangeListener
 
         // Keep the old address until the new one is confirmed → suppresses the write.
         return $oldEmail;
+    }
+
+    /**
+     * Runs after all field callbacks on a successful personal-data submit (invoked
+     * as ($user, $module); in the back end as ($dc)). Only here — once the password
+     * field's opt-in purge has already run — do we create and send the confirmation
+     * token, so it cannot be deleted within the same submit. onsubmit fires on every
+     * successful submit regardless of which fields changed, so the email-only case
+     * is covered too.
+     */
+    #[AsCallback(table: 'tl_member', target: 'config.onsubmit', priority: 255)]
+    public function onSubmit(mixed $userOrDc = null, mixed $module = null): void
+    {
+        if (null === $this->pendingChange) {
+            return;
+        }
+
+        [$memberId, $oldEmail, $newEmail] = $this->pendingChange;
+        $this->pendingChange = null;
+
+        // Replace any earlier unconfirmed email-change token of this member.
+        $this->purgePendingTokens($memberId);
+
+        $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
+
+        $url = $this->urlGenerator->generate(
+            'mandrael_confirm_member_email_change',
+            ['token' => $token->getIdentifier()],
+            UrlGeneratorInterface::ABSOLUTE_URL,
+        );
+
+        $token->send(
+            $this->trans('confirmEmailChange.subject'),
+            \sprintf($this->trans('confirmEmailChange.text'), $url),
+        );
+
+        // Security: tell the OLD address that a change was requested.
+        $this->notifyOldAddress($oldEmail, $newEmail);
     }
 
     /**

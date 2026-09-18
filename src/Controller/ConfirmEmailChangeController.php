@@ -101,6 +101,9 @@ class ConfirmEmailChangeController
 
         $usernameChanged = $this->syncUsername($member, $newEmail);
         $member->email = $newEmail;
+        // A programmatic save persists the row but does not bump tstamp on its own,
+        // so set it explicitly — matching how the core personal-data save behaves.
+        $member->tstamp = time();
         $member->save();
 
         $response = $this->page('success', false);
@@ -179,6 +182,9 @@ class ConfirmEmailChangeController
         $title = $enc($this->trans($isError ? 'confirmEmailChange.errorTitle' : 'confirmEmailChange.successTitle'));
         $text = $enc($this->trans('confirmEmailChange.'.$key));
         $back = $enc($this->trans('confirmEmailChange.backToSite'));
+        // Base path of the app, so the back link stays inside a Contao install
+        // hosted under a sub-path (empty for a domain-root install → "/").
+        $home = $enc(($this->requestStack->getCurrentRequest()?->getBasePath() ?? '').'/');
 
         $html = <<<HTML
             <!DOCTYPE html>
@@ -201,7 +207,7 @@ class ConfirmEmailChangeController
                 <main>
                     <h1>{$title}</h1>
                     <p>{$text}</p>
-                    <p><a href="/">{$back}</a></p>
+                    <p><a href="{$home}">{$back}</a></p>
                 </main>
             </body>
             </html>
