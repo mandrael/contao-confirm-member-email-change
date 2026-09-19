@@ -8,7 +8,6 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Routing\ScopeMatcher;
 use Contao\FrontendUser;
 use Contao\TestCase\ContaoTestCase;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\EmailAsUsernameLoginListener;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -29,20 +28,25 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
         $this->requestStack = new RequestStack();
     }
 
-    public function testDoesNothingWhenTheSwitchIsOff(): void
+    /**
+     * Runde 2, Befund 5 (DeepSeek BL-1): normalization is now independent of the
+     * memberEmailAsUsername switch - flipped from the former
+     * testDoesNothingWhenTheSwitchIsOff, which cemented the opposite.
+     */
+    public function testNormalizesEvenWhenTheSwitchIsOff(): void
     {
         $event = $this->event('Member@Example.com', frontend: true);
 
-        $this->listener(enabled: false)->__invoke($event);
+        $this->listener()->__invoke($event);
 
-        self::assertSame('Member@Example.com', $this->identifier($event));
+        self::assertSame('member@example.com', $this->identifier($event));
     }
 
     public function testDoesNothingOnTheBackendFirewall(): void
     {
         $event = $this->event('Member@Example.com', frontend: false);
 
-        $this->listener(enabled: true)->__invoke($event);
+        $this->listener()->__invoke($event);
 
         self::assertSame('Member@Example.com', $this->identifier($event));
     }
@@ -51,7 +55,7 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
     {
         $event = $this->event('johndoe', frontend: true);
 
-        $this->listener(enabled: true)->__invoke($event);
+        $this->listener()->__invoke($event);
 
         self::assertSame('johndoe', $this->identifier($event));
     }
@@ -63,7 +67,7 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
     {
         $event = $this->event('Member@Example.com', frontend: true);
 
-        $this->listener(enabled: true, exactMatchExists: true)->__invoke($event);
+        $this->listener(exactMatchExists: true)->__invoke($event);
 
         self::assertSame('Member@Example.com', $this->identifier($event));
     }
@@ -72,16 +76,13 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
     {
         $event = $this->event('Member@Example.com', frontend: true);
 
-        $this->listener(enabled: true, exactMatchExists: false)->__invoke($event);
+        $this->listener(exactMatchExists: false)->__invoke($event);
 
         self::assertSame('member@example.com', $this->identifier($event));
     }
 
-    private function listener(bool $enabled, bool $exactMatchExists = false): EmailAsUsernameLoginListener
+    private function listener(bool $exactMatchExists = false): EmailAsUsernameLoginListener
     {
-        $policy = $this->createMock(EmailAsUsernamePolicy::class);
-        $policy->method('isEnabled')->willReturn($enabled);
-
         $scopeMatcher = $this->createMock(ScopeMatcher::class);
         $scopeMatcher->method('isFrontendRequest')->willReturnCallback(
             static fn (Request $request): bool => 'frontend' === $request->attributes->get('_test_scope'),
@@ -92,7 +93,7 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
         ]);
         $framework = $this->createContaoFrameworkMock([FrontendUser::class => $userAdapter]);
 
-        return new EmailAsUsernameLoginListener($policy, $scopeMatcher, $this->requestStack, $framework);
+        return new EmailAsUsernameLoginListener($scopeMatcher, $this->requestStack, $framework);
     }
 
     private function event(string $identifier, bool $frontend): CheckPassportEvent

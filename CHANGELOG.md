@@ -30,7 +30,8 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Neues `tl_settings`-Feld samt Palette und deutscher/englischer Sprachdatei.
 - **Sicherheitsanker:** Eine bestätigte E-Mail-Änderung legt an `tl_member` einen Widerrufs-Anker
   an (SHA-256-Hash des Tokens, alte Adresse, Ablaufzeit; neue SQL-only-Felder
-  `emailChangeAnchorHash`/`emailChangeAnchorEmail`/`emailChangeAnchorExpires`, kein Backend-Feld)
+  `emailChangeAnchorHash`/`emailChangeAnchorEmail`/`emailChangeAnchorExpires`/
+  `emailChangeAnchorNotified`/`emailChangeAnchorPending`, alle mit `doNotCopy`, kein Backend-Feld)
   und schickt der alten Adresse eine zweite Mail mit einem 14 Tage gültigen Widerrufslink.
   Ketten-Regel: Existiert bereits ein gültiger Anker, bleibt er beim nächsten bestätigten Wechsel
   unverändert (der älteste gewinnt); die alte Adresse dieses zweiten Wechsels bekommt die
@@ -76,13 +77,39 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
   Mitglieds-ID statt über die nicht indizierte Anker-Spalte.
 - Schlägt der Versand des Widerrufslinks fehl, geht er nicht mehr verloren: Die neue Spalte
   `tl_member.emailChangeAnchorNotified` wird erst nach erfolgreichem Versand gesetzt, und ein
-  stündlicher Cron stellt für gültige, unbenachrichtigte Anker einen neuen Link mit gleicher Frist
-  aus.
+  stündlicher Cron sendet für gültige, unbenachrichtigte Anker denselben Link erneut.
 - Technische Fehler im Widerruf enden in derselben allgemeinen Antwort statt in einer Fehlerseite;
   zurückgerollt wird nur bei aktiver Transaktion, und ein Fehler nach dem Commit stellt den Erfolg
   nicht mehr als Fehlschlag dar.
 - Die Bestätigungsseite sendet `Cache-Control: private, no-store` und `X-Robots-Tag: noindex`; der
   Erfolgstext des Widerrufs nennt jetzt den Weg zu einem neuen Kennwort.
+
+### Behoben (Review Runde 2, 19.09.2026)
+- **Kopieren eines Mitglieds kopierte dessen gültigen Sicherheitsanker.** Alle fünf
+  Anker-Felder tragen jetzt `eval.doNotCopy`; DC_Table::copy() setzt sie auf ihren SQL-Standard
+  zurück, statt sie auf die Kopie zu übertragen.
+- **Der Versand-Cron konnte einen bereits zugestellten Widerrufslink entwerten.** Er rotiert den
+  Anker nicht mehr. Solange der Versand aussteht, liegt der Klartext in der neuen SQL-only-Spalte
+  `tl_member.emailChangeAnchorPending`; der Cron sendet daraus denselben Link erneut, ein doppelter
+  Versand ist unschädlich. Die Spalte wird beim erfolgreichen Versand, beim Widerruf und beim
+  Ablauf (täglicher Purge-Cron) geleert.
+- **Backend-Abgleich und Konsolenbefehl konnten einen veralteten Benutzernamen zurückschreiben.**
+  `UsernameSyncListener::onSubmitMember()` und `member-email:sync-usernames --force` schreiben
+  jetzt über ein bedingtes `UPDATE ... WHERE id = ? AND email = ?` (die gelesene Adresse), statt
+  über ein unbedingtes `Model::save()`; hat sich die Adresse zwischenzeitlich geändert, bleibt der
+  Schreibzugriff wirkungslos statt einen veralteten Namen zu setzen.
+- **Zwei vermeidbare Ausnahmen von „Benutzername = E-Mail" entfernt:** Speichern über
+  „Persönliche Daten" gleicht jetzt auch einen abweichenden Benutzernamen an die gespeicherte
+  Adresse an, selbst während eine Änderung auf Bestätigung wartet; die Registrierung überschreibt
+  jetzt auch einen bereits vorbelegten Benutzernamen.
+- **Login-Normalisierung bei abweichender Schreibweise wirkt jetzt unabhängig vom Schalter**
+  „E-Mail als Benutzername" – vorher griff sie nur bei eingeschaltetem Schalter.
+- **Anfordern der Adressänderung über „Persönliche Daten" konnte bei fehlender
+  Administrator-E-Mail zur Fehlerseite führen**, weil `ModulePersonalData` seine
+  `onsubmit`-Callbacks ohne eigenen Fang aufruft. Bestätigungs- und Hinweis-Mail laufen jetzt in
+  je einem eigenen `try`/`catch`; ein Fehlschlag wird geloggt, ohne den Ablauf abzubrechen.
+- Die Zuordnung Bestätigungslink → Mitglied wird beim Bestätigen jetzt zusätzlich aus der frisch
+  gesperrten `tl_opt_in`-Zeile geprüft, statt nur aus dem vor der Sperre gelesenen Wert.
 
 ## [1.0.0] - 2026-09-18
 

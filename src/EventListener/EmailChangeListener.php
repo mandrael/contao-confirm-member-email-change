@@ -13,6 +13,7 @@ use Contao\Email;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -47,6 +48,7 @@ class EmailChangeListener
         private readonly UrlGeneratorInterface $urlGenerator,
         private readonly RequestStack $requestStack,
         private readonly UnconfirmedTokenPurger $tokenPurger,
+        private readonly LoggerInterface|null $logger = null,
     ) {
     }
 
@@ -109,6 +111,14 @@ class EmailChangeListener
      * token, so it cannot be deleted within the same submit. onsubmit fires on every
      * successful submit regardless of which fields changed, so the email-only case
      * is covered too.
+     *
+     * DeepSeek W-4 (Runde 2): ModulePersonalData calls its onsubmit_callbacks with no
+     * try/catch of its own, so a mail failure here (typically: no effective administrator
+     * address configured, see Email::send()) would otherwise surface as an uncaught
+     * exception – a 500 for a member who just successfully changed their data. Both
+     * sends therefore get their own error boundary: a lost confirmation and a lost
+     * old-address notice are independent failures, and losing one must not swallow the
+     * other. Neither log line carries an address.
      */
     #[AsCallback(table: 'tl_member', target: 'config.onsubmit', priority: 255)]
     public function onSubmit(mixed $userOrDc = null, mixed $module = null): void
@@ -123,21 +133,29 @@ class EmailChangeListener
         // Replace any earlier unconfirmed email-change token of this member.
         $this->tokenPurger->purge($memberId, self::PREFIX);
 
-        $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
+        try {
+            $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
 
-        $url = $this->urlGenerator->generate(
-            'mandrael_confirm_member_email_change',
-            ['token' => $token->getIdentifier()],
-            UrlGeneratorInterface::ABSOLUTE_URL,
-        );
+            $url = $this->urlGenerator->generate(
+                'mandrael_confirm_member_email_change',
+                ['token' => $token->getIdentifier()],
+                UrlGeneratorInterface::ABSOLUTE_URL,
+            );
 
-        $token->send(
-            $this->trans('confirmEmailChange.subject'),
-            \sprintf($this->trans('confirmEmailChange.text'), $url),
-        );
+            $token->send(
+                $this->trans('confirmEmailChange.subject'),
+                \sprintf($this->trans('confirmEmailChange.text'), $url),
+            );
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Could not send the email-change confirmation link for member ID %d: %s.', $memberId, $e::class));
+        }
 
-        // Security: tell the OLD address that a change was requested.
-        $this->notifyOldAddress($oldEmail, $newEmail);
+        try {
+            // Security: tell the OLD address that a change was requested.
+            $this->notifyOldAddress($oldEmail, $newEmail);
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Could not notify the previous address about a pending email change for member ID %d: %s.', $memberId, $e::class));
+        }
     }
 
     /**

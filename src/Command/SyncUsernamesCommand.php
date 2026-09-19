@@ -7,6 +7,7 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Command;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\MemberModel;
 use Contao\StringUtil;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\CanonicalUsername;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
@@ -36,6 +37,7 @@ final class SyncUsernamesCommand extends Command
         private readonly ContaoFramework $framework,
         private readonly UsernamePolicy $usernamePolicy,
         private readonly EmailAsUsernamePolicy $policy,
+        private readonly Connection $connection,
     ) {
         parent::__construct();
     }
@@ -109,11 +111,18 @@ final class SyncUsernamesCommand extends Command
         };
 
         if ('würde umgestellt' === $label && $force) {
-            $member->username = CanonicalUsername::normalize((string) $member->email);
-            $member->tstamp = time();
-            $member->save();
+            // Codex 3 (Runde 2, blockierend): conditional on the address findAll() read
+            // above, same as UsernameSyncListener::onSubmitMember() - not Model::save(),
+            // which would write unconditionally and could overwrite a login name a
+            // racing confirm/revoke had just set from a different address. Zero affected
+            // rows means exactly that happened in the meantime; the next run catches it.
+            $email = (string) $member->email;
+            $affected = $this->connection->executeStatement(
+                'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND email = ?',
+                [CanonicalUsername::normalize($email), time(), (int) $member->id, $email],
+            );
 
-            return 'umgestellt';
+            return $affected > 0 ? 'umgestellt' : 'übersprungen (Adresse zwischenzeitlich geändert)';
         }
 
         return $label;

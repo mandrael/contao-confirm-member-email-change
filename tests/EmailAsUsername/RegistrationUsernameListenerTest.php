@@ -24,12 +24,24 @@ class RegistrationUsernameListenerTest extends ContaoTestCase
         $this->listener(false, $usernamePolicy)->onCreateNewUser(3, ['email' => 'new@example.com']);
     }
 
-    public function testDoesNotOverwriteAUsernameTheRegistrantAlreadyTyped(): void
+    /**
+     * Runde 2, Befund 4(b): "username IS the email" has no exception for a pre-filled
+     * value - a legacy module config or a still-posted field must not survive.
+     */
+    public function testOverwritesAUsernameTheRegistrantAlreadyTyped(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::never())->method('evaluate');
+        $usernamePolicy->method('evaluate')->with('new@example.com', 3)->willReturn(EligibilityReason::Eligible);
 
-        $this->listener(true, $usernamePolicy)->onCreateNewUser(3, ['email' => 'new@example.com', 'username' => 'johndoe']);
+        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 3, 'username' => 'johndoe', 'email' => 'new@example.com']);
+        $member->expects(self::once())->method('save');
+
+        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+
+        $this->listener(true, $usernamePolicy, $framework)->onCreateNewUser(3, ['email' => 'new@example.com', 'username' => 'johndoe']);
+
+        self::assertSame('new@example.com', $member->username);
     }
 
     /**

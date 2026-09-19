@@ -6,12 +6,15 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\EventListener;
 
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\OptIn\OptIn;
+use Contao\CoreBundle\OptIn\OptInTokenInterface;
+use Contao\Email;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -95,15 +98,71 @@ class EmailChangeListenerTest extends TestCase
         $this->listener($optIn)->onSubmit();
     }
 
-    private function listener(OptIn $optIn): EmailChangeListener
+    /**
+     * DeepSeek W-4 (Runde 2): ModulePersonalData calls onsubmit_callbacks with no
+     * try/catch of its own - a mail failure (typically: no effective administrator
+     * address) must not escape onSubmit() as an uncaught exception. The confirmation
+     * send and the old-address notice are independent failures.
+     */
+    public function testALostConfirmationSendDoesNotPreventTheOldAddressNotice(): void
+    {
+        $optIn = $this->createMock(OptIn::class);
+        $optIn->method('create')->willThrowException(new \RuntimeException('no administrator e-mail address'));
+
+        $email = $this->createMock(Email::class);
+        $email->expects(self::once())->method('sendTo')->with('old@example.com');
+
+        $framework = $this->createStub(ContaoFramework::class);
+        $framework->method('createInstance')->willReturn($email);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with(self::logicalAnd(
+            self::stringContains('member ID 7'),
+            self::logicalNot(self::stringContains('@example.com')),
+        ));
+
+        $listener = $this->listener($optIn, $framework, $logger);
+        $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
+
+        $listener->onSubmit();
+    }
+
+    public function testALostOldAddressNoticeDoesNotPreventTheConfirmationSend(): void
+    {
+        $token = $this->createMock(OptInTokenInterface::class);
+        $token->expects(self::once())->method('send');
+
+        $optIn = $this->createMock(OptIn::class);
+        $optIn->method('create')->willReturn($token);
+
+        $email = $this->createMock(Email::class);
+        $email->method('sendTo')->willThrowException(new \RuntimeException('smtp down'));
+
+        $framework = $this->createStub(ContaoFramework::class);
+        $framework->method('createInstance')->willReturn($email);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with(self::logicalAnd(
+            self::stringContains('member ID 7'),
+            self::logicalNot(self::stringContains('@example.com')),
+        ));
+
+        $listener = $this->listener($optIn, $framework, $logger);
+        $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
+
+        $listener->onSubmit();
+    }
+
+    private function listener(OptIn $optIn, ContaoFramework|null $framework = null, LoggerInterface|null $logger = null): EmailChangeListener
     {
         return new EmailChangeListener(
             $optIn,
-            $this->createStub(ContaoFramework::class),
+            $framework ?? $this->createStub(ContaoFramework::class),
             $this->createStub(TranslatorInterface::class),
             $this->createStub(UrlGeneratorInterface::class),
             $this->createStub(RequestStack::class),
             $this->createStub(UnconfirmedTokenPurger::class),
+            $logger,
         );
     }
 

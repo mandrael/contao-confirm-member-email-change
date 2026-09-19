@@ -7,7 +7,6 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Security;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Routing\ScopeMatcher;
 use Contao\FrontendUser;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Security\Http\Authenticator\Passport\Badge\UserBadge;
@@ -16,6 +15,13 @@ use Symfony\Component\Security\Http\Event\CheckPassportEvent;
 /**
  * A4: lets a member log in with a differently-cased email even though
  * tl_member.username is a case-sensitive (BINARY) column.
+ *
+ * Runde 2, Befund 5 (DeepSeek BL-1): independent of the memberEmailAsUsername switch (A1)
+ * - a member's login name IS an email address the moment ANY route wrote a lower-cased
+ * one (the switch, terminal42/contao-mailusername, or a manually assigned address-shaped
+ * name), and the switch being off afterwards must not un-break the case-insensitive login
+ * that address-shaped names imply. The "@"-only scope and the exact-match precedence below
+ * are what keeps this from touching an unrelated non-email username.
  *
  * Runs BEFORE Symfony's LoginThrottlingListener (priority 2080) and
  * UserCheckerListener (priority 256) on CheckPassportEvent, so both see the
@@ -40,7 +46,6 @@ use Symfony\Component\Security\Http\Event\CheckPassportEvent;
 final class EmailAsUsernameLoginListener
 {
     public function __construct(
-        private readonly EmailAsUsernamePolicy $policy,
         private readonly ScopeMatcher $scopeMatcher,
         private readonly RequestStack $requestStack,
         private readonly ContaoFramework $framework,
@@ -50,10 +55,6 @@ final class EmailAsUsernameLoginListener
     #[AsEventListener(event: CheckPassportEvent::class, priority: 3000)]
     public function __invoke(CheckPassportEvent $event): void
     {
-        if (!$this->policy->isEnabled()) {
-            return;
-        }
-
         $request = $this->requestStack->getMainRequest();
 
         if (null === $request || !$this->scopeMatcher->isFrontendRequest($request)) {

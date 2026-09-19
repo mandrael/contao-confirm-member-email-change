@@ -7,13 +7,17 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Cron;
 use Contao\CoreBundle\DependencyInjection\Attribute\AsCronJob;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
 
 /**
  * A8: catches the anchors whose notification mail never made it out (see AnchorNotice).
- * Only the hash of the revoke token is stored, so the lost link cannot be resent – a NEW
- * token is issued instead: new secret, same target address, same deadline. The window is
- * never extended, an anchor stays exactly as long valid as the confirmed change made it.
+ *
+ * Runde 2, Befund 2: this used to rotate the anchor on every retry, which could
+ * invalidate a link that had already reached the mailbox (two overlapping runs, or a
+ * crash between issuing the new hash and marking the old one notified). It now NEVER
+ * rotates a valid anchor - it re-sends the exact same plaintext link stashed in
+ * emailChangeAnchorPending while the send is still pending (emailChangeAnchorNotified =
+ * 0). A second successful send of the same link is harmless and accepted; the deadline
+ * (emailChangeAnchorExpires) is never touched either way.
  *
  * Hourly, not daily: this is the member's only way back after a hostile address change.
  */
@@ -29,27 +33,14 @@ class ResendEmailChangeAnchorNoticeCron
     public function __invoke(): void
     {
         $rows = $this->connection->fetchAllAssociative(
-            "SELECT id, emailChangeAnchorHash, emailChangeAnchorEmail FROM tl_member WHERE emailChangeAnchorNotified = 0 AND emailChangeAnchorHash != '' AND emailChangeAnchorExpires > ?",
+            "SELECT id, emailChangeAnchorEmail, emailChangeAnchorPending FROM tl_member WHERE emailChangeAnchorNotified = 0 AND emailChangeAnchorHash != '' AND emailChangeAnchorPending != '' AND emailChangeAnchorExpires > ?",
             [time()],
         );
 
         foreach ($rows as $row) {
-            $memberId = (int) $row['id'];
-            $token = bin2hex(random_bytes(32));
-
-            // Conditional on the hash we just read: if the anchor changed in between (a
-            // second confirmed change, a revoke, a parallel run of this cron), leave it
-            // alone rather than overwrite a link that may already be on its way.
-            $affected = $this->connection->executeStatement(
-                'UPDATE tl_member SET emailChangeAnchorHash = ? WHERE id = ? AND emailChangeAnchorHash = ? AND emailChangeAnchorNotified = 0',
-                [EmailChangeAnchorPolicy::hashToken($token), $memberId, (string) $row['emailChangeAnchorHash']],
-            );
-
-            if (0 === $affected) {
-                continue;
-            }
-
-            $this->anchorNotice->send($memberId, (string) $row['emailChangeAnchorEmail'], $token);
+            // AnchorNotice re-checks emailChangeAnchorHash on its own write, so a
+            // meanwhile-replaced or revoked anchor simply fails its conditional UPDATE.
+            $this->anchorNotice->send((int) $row['id'], (string) $row['emailChangeAnchorEmail'], (string) $row['emailChangeAnchorPending']);
         }
     }
 }

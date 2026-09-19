@@ -122,6 +122,7 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
         self::assertStringContainsString('password = ?', $update['sql']);
         self::assertStringContainsString("emailChangeAnchorExpires = 0", $update['sql']);
         self::assertNotSame('', $update['params'][1], 'the password must be overwritten, never left empty');
+        self::assertStringContainsString('emailChangeAnchorPending = ?', $update['sql'], 'the spent plaintext must be cleared, not just the hash');
     }
 
     /**

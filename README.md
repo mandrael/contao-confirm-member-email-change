@@ -51,6 +51,12 @@ meldet sich anschließend mit der neuen Adresse an.
 > `messenger:consume`), sonst bleiben die Mails liegen. Bei synchronem Mailer-Transport
 > entfällt das.
 
+> **Voraussetzung:** Eine wirksame Administrator-E-Mail-Adresse muss gesetzt sein – entweder auf
+> der Root-Seite oder in den globalen Einstellungen. Ohne sie schlägt jeder Versand (Bestätigung,
+> Sicherheits-Benachrichtigung, Widerruf-Link) fehl; das Formular meldet dem Besucher trotzdem
+> denselben Erfolg (sonst ließe sich über die Fehlermeldung erraten, welche Adresse bereits
+> vergeben ist) – ein Fehlschlag ist ausschließlich im Log sichtbar.
+
 ## E-Mail als Benutzername (Opt-in, ab 1.1)
 
 Alternative zu einer separaten Erweiterung: In `Einstellungen → E-Mail als Benutzername` lässt
@@ -62,10 +68,14 @@ gilt für den Login-Namen ausschließlich diese Regel:
   und wenn kein anderes Mitglied diesen Namen bereits trägt. Passt die Adresse nicht, wird das
   **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden").
 - **Folgeregel:** Der Benutzername folgt **immer** der aktuellen E-Mail-Adresse – bei der
-  Registrierung, im Self-Service-Profil, bei Backend-Bearbeitung und nach einer bestätigten
-  E-Mail-Änderung. Ein bereits abweichender Benutzername wird beim nächsten Speichern des
-  Mitglieds korrigiert; einzige Ausnahme ist eine noch **unbestätigte** E-Mail-Änderung – dort
-  bleibt der Benutzername bis zur Bestätigung an der alten, noch gültigen Adresse.
+  Registrierung (auch ein bereits vorbelegter Name wird dabei überschrieben), im
+  Self-Service-Profil, bei Backend-Bearbeitung und nach einer bestätigten E-Mail-Änderung. Ein
+  bereits abweichender Benutzername wird beim nächsten Speichern des Mitglieds korrigiert;
+  einzige Ausnahme ist eine noch **unbestätigte** E-Mail-Änderung – dort bleibt der Benutzername
+  bis zur Bestätigung an der alten, noch gültigen Adresse. Jeder Schreibzugriff ist an genau diese
+  gelesene Adresse gebunden: Hat sie sich durch eine parallel abgeschlossene Bestätigung oder
+  einen Widerruf bereits geändert, unterbleibt der Schreibzugriff und das nächste Speichern
+  (oder `member-email:sync-usernames`) holt ihn nach.
 - **Abgelehnt wird, bevor etwas entsteht:** Eine unzulässige Adresse wird schon beim Speichern
   des Formulars abgewiesen – in der Registrierung (das Mitglied wird gar nicht erst angelegt),
   im Self-Service-Profil (die Änderung wird nicht einmal angefordert) und im Backend. Wird sie
@@ -88,7 +98,10 @@ gilt für den Login-Namen ausschließlich diese Regel:
 - **Login mit abweichender Schreibweise:** Existiert kein Mitglied mit dem exakt eingegebenen
   Benutzernamen, wird beim Anmelden zusätzlich die kleingeschriebene Variante gesucht (nur an der
   öffentlichen Website, nur wenn die Eingabe ein „@" enthält) – ein bestehender, anders
-  geschriebener Benutzername wird dabei nie verdeckt.
+  geschriebener Benutzername wird dabei nie verdeckt. Diese Normalisierung gilt **unabhängig vom
+  Schalter**: Sobald irgendein Benutzername wie eine E-Mail-Adresse aussieht (dieser Opt-in, eine
+  der Erweiterungen unten oder ein von Hand vergebener Name), soll die Anmeldung bei ihm nicht an
+  der Groß-/Kleinschreibung scheitern.
 - **Bestandsmitglieder mit abweichendem Benutzernamen** korrigiert der automatische Abgleich beim
   nächsten Speichern von selbst; für den gesamten Bestand auf einmal gibt es den Konsolenbefehl:
 
@@ -118,6 +131,12 @@ dasselbe Feld):
 Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt
 `tl_member.username` unangetastet – unverändert gegenüber 1.0.
 
+**Bekannte Grenze:** Bei **eingeschaltetem** Schalter erzwingt der `UNIQUE`-Index auf
+`tl_member.username` zusätzlich, dass zwei Mitglieder nie dieselbe E-Mail-Adresse tragen. Bei
+**ausgeschaltetem** Schalter (und ohne aktive Erweiterung) besteht diese Absicherung nicht: Zwei
+gleichzeitige Bestätigungen derselben, bis dahin freien Zieladresse sind nicht datenbankseitig
+ausgeschlossen – `tl_member.email` ist DCA-eindeutig, aber nicht per Datenbank-Constraint.
+
 ## Sicherheitsanker (ab 1.1)
 
 Eine E-Mail-Änderung verlangt kein Kennwort – wer eine offene Profilsitzung kapert, könnte
@@ -128,10 +147,12 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
 
 - **Anker, nicht Core-`OptIn`:** eigene, nur per SQL angelegte Felder an `tl_member`
   (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`,
-  `emailChangeAnchorNotified`) statt des
+  `emailChangeAnchorNotified`, `emailChangeAnchorPending`) statt des
   Core-Opt-in-Mechanismus, dessen Gültigkeit je Contao-Version unterschiedlich fest verdrahtet
-  ist. Gespeichert wird nur der SHA-256-Hash des Tokens, der Klartext steht ausschließlich in
-  der Mail.
+  ist. Gespeichert wird der SHA-256-Hash des Tokens; der Klartext steht in der Mail und – nur für
+  die Dauer eines noch ausstehenden Versands – zusätzlich in `emailChangeAnchorPending` (genauso
+  handhabt es Contaos eigenes `tl_opt_in` mit Bestätigungslinks). Sobald die Mail draußen ist, wird
+  das Feld sofort wieder geleert.
 - **Ketten-Regel:** Existiert beim nächsten bestätigten Wechsel noch ein gültiger Anker, bleibt
   er unverändert – sonst könnte ein Angreifer, der das Konto gerade übernommen hat, den echten
   Anker mit einem zweiten Wechsel überschreiben und die Rückholmöglichkeit des ursprünglichen
@@ -151,11 +172,11 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   daran nicht scheitern; der Benutzername bleibt dann stehen und der Betreiber bekommt einen
   Log-Eintrag. Jeder Fehlschlag zeigt dieselbe allgemeine Meldung, unabhängig vom Grund – auch ein
   rein technischer.
-- **Verlorene Benachrichtigung:** Gespeichert wird nur der Hash, den Klartext-Link gibt es
-  ausschließlich in der Mail. Schlägt der Versand fehl, bliebe die einzige Rückholmöglichkeit
+- **Verlorene Benachrichtigung:** Schlägt der Versand fehl, bliebe die einzige Rückholmöglichkeit
   unbrauchbar. Deshalb wird `emailChangeAnchorNotified` erst gesetzt, wenn die Mail wirklich
-  draußen ist; ein stündlicher Cron stellt für gültige, unbenachrichtigte Anker einen **neuen**
-  Link aus (neuer Hash, gleiche Zieladresse, **gleiche Frist** – die Frist wird nie verlängert).
+  draußen ist; ein stündlicher Cron sendet für gültige, unbenachrichtigte Anker **denselben**
+  bereits ausgestellten Link erneut (aus `emailChangeAnchorPending`) – die Frist wird nie
+  verlängert und der Link nie rotiert, ein doppelter Versand desselben Links ist unschädlich.
   Läuft der Cron per CLI, muss `framework.router.default_uri` gesetzt sein, sonst kennt die
   Kommandozeile die Domain der Website nicht.
 - **Sperrprotokoll:** Bestätigung und Widerruf laufen nach demselben Ablauf – Transaktion,

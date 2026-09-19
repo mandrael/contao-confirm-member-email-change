@@ -10,32 +10,31 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice
 use PHPUnit\Framework\TestCase;
 
 /**
- * Codex 6: a lost notice must not cost the member their only way back. A NEW token is
- * issued for the same deadline - the window is never extended.
+ * Runde 2, Befund 2: the cron used to issue a NEW token on every retry, which could
+ * invalidate a link that had already reached the mailbox. It now never rotates a valid
+ * anchor - it re-sends the exact plaintext stashed in emailChangeAnchorPending while the
+ * send is still pending. A duplicate send of the same link is accepted as harmless.
  */
 class ResendEmailChangeAnchorNoticeCronTest extends TestCase
 {
-    public function testIssuesANewTokenForTheSameDeadlineAndSendsIt(): void
+    public function testResendsTheStashedPlaintextWithoutIssuingANewToken(): void
     {
-        $oldHash = str_repeat('a', 64);
+        $pending = str_repeat('b', 64);
 
-        $statements = [];
         $connection = $this->createMock(Connection::class);
         $connection->method('fetchAllAssociative')->willReturnCallback(
-            static function (string $sql) use ($oldHash): array {
+            static function (string $sql) use ($pending): array {
                 self::assertStringContainsString('emailChangeAnchorNotified = 0', $sql);
+                self::assertStringContainsString("emailChangeAnchorPending != ''", $sql);
                 self::assertStringContainsString('emailChangeAnchorExpires > ?', $sql);
 
-                return [['id' => 7, 'emailChangeAnchorHash' => $oldHash, 'emailChangeAnchorEmail' => 'old@example.com']];
+                return [['id' => 7, 'emailChangeAnchorEmail' => 'old@example.com', 'emailChangeAnchorPending' => $pending]];
             },
         );
-        $connection->method('executeStatement')->willReturnCallback(
-            static function (string $sql, array $params) use (&$statements): int {
-                $statements[] = [$sql, $params];
 
-                return 1;
-            },
-        );
+        // The cron itself must never write - AnchorNotice::send() owns every write to
+        // emailChangeAnchorNotified/emailChangeAnchorPending.
+        $connection->expects(self::never())->method('executeStatement');
 
         $sent = [];
         $anchorNotice = $this->createMock(AnchorNotice::class);
@@ -49,24 +48,14 @@ class ResendEmailChangeAnchorNoticeCronTest extends TestCase
 
         (new ResendEmailChangeAnchorNoticeCron($connection, $anchorNotice))();
 
-        self::assertCount(1, $statements);
-        self::assertStringNotContainsString('emailChangeAnchorExpires', $statements[0][0], 'the deadline must not be touched');
-        self::assertSame(hash('sha256', $sent[2]), $statements[0][1][0]);
-        self::assertSame($oldHash, $statements[0][1][2], 'the update is conditional on the hash that was read');
-        self::assertSame([7, 'old@example.com'], [$sent[0], $sent[1]]);
+        self::assertSame([7, 'old@example.com', $pending], $sent, 'the SAME stashed plaintext must be re-sent, never a freshly generated one');
     }
 
-    /**
-     * The anchor changed between the read and the update (second confirmed change, a
-     * revoke, a parallel run) - do not overwrite a link that may already be on its way.
-     */
-    public function testSkipsWhenTheAnchorChangedInParallel(): void
+    public function testDoesNothingWhenNoAnchorIsPending(): void
     {
         $connection = $this->createMock(Connection::class);
-        $connection->method('fetchAllAssociative')->willReturn([
-            ['id' => 7, 'emailChangeAnchorHash' => str_repeat('a', 64), 'emailChangeAnchorEmail' => 'old@example.com'],
-        ]);
-        $connection->method('executeStatement')->willReturn(0);
+        $connection->method('fetchAllAssociative')->willReturn([]);
+        $connection->expects(self::never())->method('executeStatement');
 
         $anchorNotice = $this->createMock(AnchorNotice::class);
         $anchorNotice->expects(self::never())->method('send');

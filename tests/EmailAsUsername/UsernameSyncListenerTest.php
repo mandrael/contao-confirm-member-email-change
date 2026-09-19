@@ -4,12 +4,11 @@ declare(strict_types=1);
 
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\EmailAsUsername;
 
-use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\DataContainer;
 use Contao\FrontendUser;
-use Contao\MemberModel;
 use Contao\ModulePersonalData;
 use Contao\TestCase\ContaoTestCase;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
@@ -21,6 +20,11 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * The field callback only VALIDATES, the onsubmit callback WRITES - see the class
  * docblock of UsernameSyncListener for why (Codex 1: a write in the field callback runs
  * before the core's own uniqueness check).
+ *
+ * Every write in onSubmitMember() goes through a single conditional UPDATE
+ * (`id = ? AND email = ?`, Runde 2 Befund 3, blockierend) - a Model::save() call would
+ * write unconditionally and could overwrite a login name a racing confirm/revoke had
+ * just set from a different address.
  */
 class UsernameSyncListenerTest extends ContaoTestCase
 {
@@ -33,7 +37,10 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::never())->method('evaluate');
 
-        $listener = $this->listener(false, $usernamePolicy);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
+        $listener = $this->listener(false, $usernamePolicy, $connection);
         $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
 
         self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
@@ -50,11 +57,10 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
 
-        $memberAdapter = $this->createAdapterMock(['findByPk']);
-        $memberAdapter->expects(self::never())->method('findByPk');
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
 
-        $listener = $this->listener(true, $usernamePolicy, $framework);
+        $listener = $this->listener(true, $usernamePolicy, $connection);
 
         self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $this->dataContainer(7, 'johndoe', 'old@example.com')));
     }
@@ -121,9 +127,8 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Invalid);
 
-        $memberAdapter = $this->createAdapterMock(['findByPk']);
-        $memberAdapter->expects(self::never())->method('findByPk');
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
 
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('warning')->with(self::logicalAnd(
@@ -131,31 +136,53 @@ class UsernameSyncListenerTest extends ContaoTestCase
             self::logicalNot(self::stringContains('a#b@example.com')),
         ));
 
-        $this->listener(true, $usernamePolicy, $framework, $logger)->onSubmitMember($this->dataContainer(7, 'johndoe', 'a#b@example.com'));
+        $this->listener(true, $usernamePolicy, $connection, $logger)->onSubmitMember($this->dataContainer(7, 'johndoe', 'a#b@example.com'));
     }
 
     /**
-     * Codex 1: after a back end save the login name really has to be on the model when
-     * save() runs - the old setRow() never marked anything as modified.
+     * Codex 1/3: the back-end save writes a single conditional UPDATE, never an
+     * unconditional Model::save() - and the WHERE clause pins the address just read.
      */
-    public function testWritesTheLoginNameAfterTheBackEndSave(): void
+    public function testWritesTheLoginNameAfterTheBackEndSaveWithAConditionalUpdate(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::once())->method('evaluate')->with('New@Example.com', 7)->willReturn(EligibilityReason::Eligible);
 
-        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 7, 'username' => 'johndoe']);
-        $member->expects(self::once())->method('save')->willReturnCallback(
-            static function () use ($member): void {
-                self::assertSame('new@example.com', $member->username, 'the login name has to be set BEFORE save()');
+        $statements = [];
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturnCallback(
+            static function (string $sql, array $params) use (&$statements): int {
+                $statements[] = [$sql, $params];
+
+                return 1;
             },
         );
 
-        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($this->dataContainer(7, 'johndoe', 'New@Example.com'));
 
-        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'johndoe', 'New@Example.com'));
+        self::assertCount(1, $statements);
+        self::assertStringContainsString('username = ?', $statements[0][0]);
+        self::assertStringContainsString('id = ? AND email = ?', $statements[0][0], 'the write must be conditional on the address just read');
+        self::assertSame(['new@example.com', $statements[0][1][1], 7, 'New@Example.com'], $statements[0][1]);
+    }
 
-        self::assertSame('new@example.com', $member->username);
+    /**
+     * Codex 3 (Runde 2, blockierend): zero affected rows - the address changed between
+     * the read and this save (a racing confirm/revoke) - must not throw or retry. The
+     * SQL condition alone prevents the stale write; the listener has nothing further to do.
+     */
+    public function testZeroAffectedRowsIsNotTreatedAsAnError(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturn(0);
+
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($this->dataContainer(7, 'johndoe', 'New@Example.com'));
+
+        // No exception, no second write attempt - reaching this line is the assertion.
+        self::assertTrue(true);
     }
 
     /**
@@ -168,15 +195,13 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
 
-        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 7, 'username' => 'Anna@Example.com']);
-        $member->expects(self::once())->method('save');
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->with(
+            self::anything(),
+            self::callback(static fn (array $params): bool => 'anna@example.com' === $params[0]),
+        )->willReturn(1);
 
-        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
-
-        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'Anna@Example.com', 'Anna@Example.com'));
-
-        self::assertSame('anna@example.com', $member->username);
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($this->dataContainer(7, 'Anna@Example.com', 'Anna@Example.com'));
     }
 
     public function testAnAlreadyCanonicalLoginNameIsLeftAlone(): void
@@ -184,25 +209,41 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::never())->method('evaluate');
 
-        $memberAdapter = $this->createAdapterMock(['findByPk']);
-        $memberAdapter->expects(self::never())->method('findByPk');
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
 
-        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'old@example.com', 'old@example.com'));
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($this->dataContainer(7, 'old@example.com', 'old@example.com'));
     }
 
     /**
-     * The front end never writes: ModulePersonalData passes the user object, not a
-     * DataContainer, and a pending change is indistinguishable from an unchanged email.
+     * Codex 4 (a), Runde 2: the front end now DOES write - saving "personal data" (even
+     * while an address change is still pending) has to sync a mismatched login name too,
+     * not just registration/confirm/revoke.
      */
-    public function testTheFrontEndSubmitNeverWrites(): void
+    public function testSyncsTheLoginNameOnAFrontEndPersonalDataSave(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::never())->method('evaluate');
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('old@example.com', 7)->willReturn(EligibilityReason::Eligible);
 
+        $statements = [];
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturnCallback(
+            static function (string $sql, array $params) use (&$statements): int {
+                $statements[] = [$sql, $params];
+
+                return 1;
+            },
+        );
+
+        // Username deliberately "fantasy" (does not match the email), address unchanged -
+        // EmailChangeListener already pinned $user->email to the SAVED address even while
+        // a different change might be pending, see the class docblock.
         $user = $this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 7, 'username' => 'johndoe', 'email' => 'old@example.com']);
+        $module = $this->createStub(ModulePersonalData::class);
 
-        $this->listener(true, $usernamePolicy)->onSubmitMember($user);
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($user, $module);
+
+        self::assertSame(['old@example.com', $statements[0][1][1], 7, 'old@example.com'], $statements[0][1]);
     }
 
     /**
@@ -227,10 +268,13 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::never())->method('evaluate');
 
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
         $dc = $this->createMock(DataContainer::class);
         $dc->method('getCurrentRecord')->willReturn(null);
 
-        $this->listener(true, $usernamePolicy)->onSubmitMember($dc);
+        $this->listener(true, $usernamePolicy, $connection)->onSubmitMember($dc);
     }
 
     private function callbackPriority(string $class, string $method): int
@@ -245,7 +289,7 @@ class UsernameSyncListenerTest extends ContaoTestCase
     private function listener(
         bool $enabled,
         UsernamePolicy $usernamePolicy,
-        ContaoFramework|null $framework = null,
+        Connection|null $connection = null,
         LoggerInterface|null $logger = null,
     ): UsernameSyncListener {
         $policy = $this->createMock(EmailAsUsernamePolicy::class);
@@ -255,7 +299,7 @@ class UsernameSyncListenerTest extends ContaoTestCase
             $policy,
             $usernamePolicy,
             $this->createStub(TranslatorInterface::class),
-            $framework ?? $this->createContaoFrameworkMock(),
+            $connection ?? $this->createStub(Connection::class),
             $logger,
         );
     }

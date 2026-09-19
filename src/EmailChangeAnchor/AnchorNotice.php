@@ -13,13 +13,15 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * A8: sends the revoke link to the old address and only THEN marks the anchor as
- * notified (tl_member.emailChangeAnchorNotified).
+ * notified and clears the stashed plaintext (tl_member.emailChangeAnchorNotified /
+ * emailChangeAnchorPending).
  *
- * The order matters: only the hash of the token is stored, so the plaintext link exists
- * nowhere but in this mail. A send that fails after the change was committed would
- * otherwise leave the member with an anchor they can never use. Leaving the column at 0
- * hands the case to ResendEmailChangeAnchorNoticeCron, which issues a NEW token for the
- * same deadline.
+ * The order matters: the plaintext link exists only in this mail and, for as long as the
+ * send is pending, in emailChangeAnchorPending (see the DCA comment). A send that fails
+ * after the change was committed would otherwise leave the member with an anchor they
+ * can never use. Leaving emailChangeAnchorNotified at 0 hands the case to
+ * ResendEmailChangeAnchorNoticeCron, which re-sends the SAME stashed link - Runde 2,
+ * Befund 2: rotating it on every retry could invalidate a link that already arrived.
  *
  * Used by ConfirmEmailChangeController (right after its commit) and by that cron.
  */
@@ -66,8 +68,10 @@ class AnchorNotice
             return false;
         }
 
+        // Clearing emailChangeAnchorPending in the SAME update the send success gates on:
+        // the plaintext has done its job now that the mail is out.
         $this->connection->executeStatement(
-            'UPDATE tl_member SET emailChangeAnchorNotified = 1 WHERE id = ? AND emailChangeAnchorHash = ?',
+            "UPDATE tl_member SET emailChangeAnchorNotified = 1, emailChangeAnchorPending = '' WHERE id = ? AND emailChangeAnchorHash = ?",
             [$memberId, EmailChangeAnchorPolicy::hashToken($plainToken)],
         );
 

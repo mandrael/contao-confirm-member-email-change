@@ -20,7 +20,7 @@ class PurgeExpiredEmailChangeAnchorsCronTest extends TestCase
         $connection = $this->createMock(Connection::class);
         $connection->expects(self::once())
             ->method('executeStatement')
-            ->with(self::stringContains('emailChangeAnchorHash'), self::isArray())
+            ->with(self::logicalAnd(self::stringContains('emailChangeAnchorHash'), self::stringContains('emailChangeAnchorPending')), self::isArray())
             ->willReturn(3)
         ;
 

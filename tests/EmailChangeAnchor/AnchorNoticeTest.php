@@ -38,6 +38,7 @@ class AnchorNoticeTest extends ContaoTestCase
         self::assertTrue($this->notice($email, $connection)->send(7, 'old@example.com', self::TOKEN));
         self::assertCount(1, $statements);
         self::assertStringContainsString('emailChangeAnchorNotified = 1', $statements[0][0]);
+        self::assertStringContainsString("emailChangeAnchorPending = ''", $statements[0][0], 'the stashed plaintext must be cleared once the mail is out');
         self::assertSame([7, hash('sha256', self::TOKEN)], $statements[0][1]);
     }
 

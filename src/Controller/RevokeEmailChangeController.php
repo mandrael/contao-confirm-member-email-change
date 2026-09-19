@@ -214,24 +214,28 @@ class RevokeEmailChangeController
         $newUsername = $this->usernameChangeSync->resolve($oldUsername, (string) $row['email'], $restoredEmail, $memberId);
 
         if (null === $newUsername && $this->usernameChangeSync->rejects($restoredEmail, $memberId)) {
-            // The restored address cannot become the login name again, typically because
-            // somebody else took it meanwhile. The revoke is a SECURITY function and must
-            // NOT fail over it: address and password are put right regardless, only the
-            // login name stays behind. The operator gets a log entry to sort it out.
+            // Runde 2, Befund 4: one of the two DELIBERATE exceptions to "username IS the
+            // email" (the other is UsernameSyncListener's unchanged-ineligible-address
+            // case). The restored address cannot become the login name again, typically
+            // because somebody else took it meanwhile. The revoke is a SECURITY function
+            // and must NOT fail over it: address and password are put right regardless,
+            // only the login name stays behind. The operator gets a log entry to sort it out.
             $this->logger?->error(\sprintf('Email-change revoke for member ID %d kept the previous login name: the restored address is not eligible as one. Please correct it manually.', $memberId));
         }
 
         // tl_member.username carries a UNIQUE index and is nullable, so it is only ever
         // written with a real value, never blanked back to an empty string.
+        // emailChangeAnchorPending is cleared alongside the hash - the plaintext it
+        // stashed for the pending-send window (Runde 2, Befund 2) is spent once consumed.
         if (null !== $newUsername && '' !== $newUsername && $newUsername !== $oldUsername) {
             $this->connection->executeStatement(
-                'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, tstamp = ? WHERE id = ?',
-                [$restoredEmail, $newUsername, $this->invalidatedPasswordHash(), '', '', time(), $memberId],
+                'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',
+                [$restoredEmail, $newUsername, $this->invalidatedPasswordHash(), '', '', '', time(), $memberId],
             );
         } else {
             $this->connection->executeStatement(
-                'UPDATE tl_member SET email = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, tstamp = ? WHERE id = ?',
-                [$restoredEmail, $this->invalidatedPasswordHash(), '', '', time(), $memberId],
+                'UPDATE tl_member SET email = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',
+                [$restoredEmail, $this->invalidatedPasswordHash(), '', '', '', time(), $memberId],
             );
         }
 

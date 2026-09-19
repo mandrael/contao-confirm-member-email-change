@@ -12,6 +12,7 @@ use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\CoreBundle\OptIn\OptInTokenNoLongerValidException;
 use Contao\Email;
 use Contao\FrontendUser;
+use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice;
@@ -125,6 +126,10 @@ class ConfirmEmailChangeController
      * Deliberately NO named GET_LOCK here: the directory bundle takes one BEFORE this
      * row lock, so taking one here too would create the opposite lock order.
      *
+     * The member/token relation itself is re-verified from the freshly locked tl_opt_in
+     * row too (Runde 2, Hinweis) – $memberId is still the one read before the lock, only
+     * used to acquire it, never trusted for the write below without this re-check.
+     *
      * @return array{page: string|null, error: bool, oldEmail: string, revokeToken: string|null, usernameChanged: bool}
      */
     private function confirmUnderLock(OptInTokenInterface $optInToken, int $memberId): array
@@ -149,7 +154,7 @@ class ConfirmEmailChangeController
         // The token object was loaded BEFORE the lock. Re-read its row, locking, so two
         // parallel confirmations of the same link cannot both get past this point.
         $tokenRow = $this->connection->fetchAssociative(
-            'SELECT confirmedOn, invalidatedThrough, createdOn, email FROM tl_opt_in WHERE token = ? FOR UPDATE',
+            'SELECT confirmedOn, invalidatedThrough, createdOn, email, relatedRecords FROM tl_opt_in WHERE token = ? FOR UPDATE',
             [$optInToken->getIdentifier()],
         );
 
@@ -164,6 +169,16 @@ class ConfirmEmailChangeController
         // Same rule as OptInToken::isValid() (core 5.3 OptInToken.php:37-40).
         if ('' !== (string) $tokenRow['invalidatedThrough'] || (int) $tokenRow['createdOn'] <= strtotime('-24 hours')) {
             return $fail('expired', true);
+        }
+
+        // Runde 2, Hinweis (Codex): $memberId above came from $optInToken->getRelatedRecords(),
+        // read BEFORE the lock. Re-derive it from the SAME locked row the checks above just
+        // read, so the relation this confirmation acts on is verified fresh, not trusted from
+        // before the lock was even acquired.
+        $relatedRecords = $this->framework->getAdapter(StringUtil::class)->deserialize($tokenRow['relatedRecords'] ?? null, true);
+
+        if ($memberId !== (int) ($relatedRecords['tl_member'][0] ?? 0)) {
+            return $fail('invalid', true);
         }
 
         $newEmail = (string) $tokenRow['email'];
@@ -227,10 +242,13 @@ class ConfirmEmailChangeController
             $revokeToken = bin2hex(random_bytes(32));
 
             // emailChangeAnchorNotified stays 0 until the link really went out, see
-            // AnchorNotice and ResendEmailChangeAnchorNoticeCron.
+            // AnchorNotice and ResendEmailChangeAnchorNoticeCron. emailChangeAnchorPending
+            // carries the plaintext for exactly that pending window (Runde 2, Befund 2) -
+            // writing it here also naturally replaces whatever an earlier, since-expired
+            // anchor may have left behind.
             $this->connection->executeStatement(
-                'UPDATE tl_member SET emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = ?, emailChangeAnchorNotified = 0 WHERE id = ?',
-                [EmailChangeAnchorPolicy::hashToken($revokeToken), $oldEmail, time() + EmailChangeAnchorPolicy::TTL_SECONDS, $memberId],
+                'UPDATE tl_member SET emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = ?, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ? WHERE id = ?',
+                [EmailChangeAnchorPolicy::hashToken($revokeToken), $oldEmail, time() + EmailChangeAnchorPolicy::TTL_SECONDS, $revokeToken, $memberId],
             );
         }
 

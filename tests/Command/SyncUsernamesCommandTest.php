@@ -8,6 +8,7 @@ use Contao\MemberModel;
 use Contao\StringUtil;
 use Contao\TestCase\ContaoTestCase;
 use Contao\Validator;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Command\SyncUsernamesCommand;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
@@ -18,12 +19,12 @@ class SyncUsernamesCommandTest extends ContaoTestCase
     public function testDryRunReportsCasesAndDoesNotWrite(): void
     {
         $eligible = $this->member(1, 'new@example.com', '', 'a:0:{}');
-        $eligible->expects(self::never())->method('save');
-
         $unchanged = $this->member(2, 'same@example.com', 'same@example.com', 'a:0:{}');
-        $unchanged->expects(self::never())->method('save');
 
-        $tester = $this->tester([$eligible, $unchanged]);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
+        $tester = $this->tester([$eligible, $unchanged], connection: $connection);
         $tester->execute([]);
 
         $output = $tester->getDisplay();
@@ -34,27 +35,60 @@ class SyncUsernamesCommandTest extends ContaoTestCase
         self::assertSame(0, $tester->getStatusCode());
     }
 
-    public function testForceWritesTheEligibleChange(): void
+    /**
+     * Codex 3 (Runde 2, blockierend): --force writes through a conditional UPDATE, never
+     * an unconditional Model::save() - see SyncUsernamesCommand::classify().
+     */
+    public function testForceWritesTheEligibleChangeWithAConditionalUpdate(): void
     {
         $eligible = $this->member(1, 'New@Example.com', '', 'a:0:{}');
-        $eligible->expects(self::once())->method('save');
 
-        $tester = $this->tester([$eligible]);
+        $statements = [];
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturnCallback(
+            static function (string $sql, array $params) use (&$statements): int {
+                $statements[] = [$sql, $params];
+
+                return 1;
+            },
+        );
+
+        $tester = $this->tester([$eligible], connection: $connection);
         $tester->execute(['--force' => true]);
 
-        self::assertSame('new@example.com', $eligible->username);
+        self::assertStringContainsString('id = ? AND email = ?', $statements[0][0], 'the write must be conditional on the address just read');
+        self::assertSame(['new@example.com', $statements[0][1][1], 1, 'New@Example.com'], $statements[0][1]);
         self::assertStringContainsString('umgestellt: 1', $tester->getDisplay());
+    }
+
+    /**
+     * Codex 3 (Runde 2, blockierend): zero affected rows - the address changed between
+     * findAll() and this write (a racing confirm/revoke) - is reported, not silently
+     * counted as a success, and never retried within the same run.
+     */
+    public function testZeroAffectedRowsIsReportedAsSkipped(): void
+    {
+        $eligible = $this->member(1, 'New@Example.com', '', 'a:0:{}');
+
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::once())->method('executeStatement')->willReturn(0);
+
+        $tester = $this->tester([$eligible], connection: $connection);
+        $tester->execute(['--force' => true]);
+
+        self::assertStringNotContainsString('umgestellt: 1', $tester->getDisplay());
+        self::assertStringContainsString('übersprungen', $tester->getDisplay());
     }
 
     public function testGroupOptionLimitsToMatchingMembers(): void
     {
         $inGroup = $this->member(1, 'in@example.com', '', 'a:1:{i:0;i:2;}');
-        $inGroup->expects(self::never())->method('save');
-
         $outOfGroup = $this->member(2, 'out@example.com', '', 'a:1:{i:0;i:9;}');
-        $outOfGroup->expects(self::never())->method('save');
 
-        $tester = $this->tester([$inGroup, $outOfGroup]);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
+        $tester = $this->tester([$inGroup, $outOfGroup], connection: $connection);
         $tester->execute(['--group' => '2']);
 
         // Only the matching member (ID 1) may be counted – proves the group filter, not just
@@ -70,9 +104,11 @@ class SyncUsernamesCommandTest extends ContaoTestCase
     public function testForceIsRefusedWhileTheSwitchIsOff(): void
     {
         $member = $this->member(1, 'New@Example.com', '', 'a:0:{}');
-        $member->expects(self::never())->method('save');
 
-        $tester = $this->tester([$member], false);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
+        $tester = $this->tester([$member], false, $connection);
         $tester->execute(['--force' => true]);
 
         self::assertSame(1, $tester->getStatusCode());
@@ -86,9 +122,11 @@ class SyncUsernamesCommandTest extends ContaoTestCase
     public function testTheDryRunStillWorksWhileTheSwitchIsOff(): void
     {
         $member = $this->member(1, 'new@example.com', '', 'a:0:{}');
-        $member->expects(self::never())->method('save');
 
-        $tester = $this->tester([$member], false);
+        $connection = $this->createMock(Connection::class);
+        $connection->expects(self::never())->method('executeStatement');
+
+        $tester = $this->tester([$member], false, $connection);
         $tester->execute([]);
 
         self::assertSame(0, $tester->getStatusCode());
@@ -98,7 +136,7 @@ class SyncUsernamesCommandTest extends ContaoTestCase
     /**
      * @param list<MemberModel&\PHPUnit\Framework\MockObject\MockObject> $members
      */
-    private function tester(array $members, bool $switchOn = true): CommandTester
+    private function tester(array $members, bool $switchOn = true, Connection|null $connection = null): CommandTester
     {
         $memberAdapter = $this->createAdapterMock(['findAll', 'findOneBy']);
         $memberAdapter->method('findAll')->willReturn($members);
@@ -120,7 +158,7 @@ class SyncUsernamesCommandTest extends ContaoTestCase
         $policy = $this->createStub(EmailAsUsernamePolicy::class);
         $policy->method('isEnabled')->willReturn($switchOn);
 
-        $command = new SyncUsernamesCommand($framework, new UsernamePolicy($framework), $policy);
+        $command = new SyncUsernamesCommand($framework, new UsernamePolicy($framework), $policy, $connection ?? $this->createStub(Connection::class));
 
         return new CommandTester($command);
     }

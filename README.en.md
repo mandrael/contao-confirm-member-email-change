@@ -50,6 +50,12 @@ with the new address.
 > asynchronously, so a worker must be running (`contao:worker` or `messenger:consume`),
 > otherwise the emails stay queued. With a synchronous mailer transport this does not apply.
 
+> **Requirement:** an effective administrator email address must be set – either on the root
+> page or in the global settings. Without it every send (confirmation, security notice, revoke
+> link) fails; the form still reports the same success to the visitor (otherwise the error
+> message would let them guess which address is already taken) – a failed send is visible only
+> in the log.
+
 ## Email as username (opt-in, since 1.1)
 
 An alternative to a separate extension: under `Settings → Email as username` you can switch on
@@ -60,11 +66,14 @@ governs the login name:
   64 characters, passing Contao's own `extnd` character check (which excludes, among others,
   `# < > ( ) \ =`), and only if no other member already carries that name. If the address does not
   qualify, **saving the email is rejected** ("This address cannot be used as a login name").
-- **Follow rule:** the username **always** follows the current email address – on registration, in
-  the self-service profile, on a back end edit, and after a confirmed email change. An already
-  different username is corrected the next time the member is saved; the one exception is a still
-  **unconfirmed** email change - there the username stays at the old, still-valid address until it
-  is confirmed.
+- **Follow rule:** the username **always** follows the current email address – on registration
+  (overwriting an already pre-filled name too), in the self-service profile, on a back end edit,
+  and after a confirmed email change. An already different username is corrected the next time
+  the member is saved; the one exception is a still **unconfirmed** email change - there the
+  username stays at the old, still-valid address until it is confirmed. Every write is bound to
+  exactly the address it just read: if that address already changed through a confirmation or
+  revocation racing this very save, the write is skipped and the next save (or
+  `member-email:sync-usernames`) catches up.
 - **Rejected before anything comes into existence:** an ineligible address is turned down when the
   form is saved - during registration (no member is created at all), in the self-service profile
   (the change is not even requested) and in the back end. If it only becomes ineligible between
@@ -83,7 +92,9 @@ governs the login name:
   to log in with (label only, the form field is technically still named `username`).
 - **Login with a different case:** if no member carries the exact typed username, the login also
   tries the lowercased variant (public site only, only when the input contains an "@") – an
-  existing, differently-cased username is never shadowed by this.
+  existing, differently-cased username is never shadowed by this. This normalization applies
+  **regardless of the switch**: as soon as any username looks like an email address (this opt-in,
+  one of the extensions below, or a manually assigned name), login should not fail on case alone.
 - **Existing members with a different username** are corrected automatically the next time they
   are saved; to fix the whole existing database in one go, there is the console command:
 
@@ -113,6 +124,12 @@ Either the built-in opt-in above **or** one of the following extensions – not 
 With the built-in opt-in off and neither extension active, `tl_member.username` is left
 untouched – unchanged from 1.0.
 
+**Known limitation:** with the switch **on**, the `UNIQUE` index on `tl_member.username`
+additionally guarantees that no two members ever carry the same email address. With the switch
+**off** (and no extension active), that guarantee does not exist: two simultaneous confirmations
+of the same, previously free target address are not excluded at the database level -
+`tl_member.email` is unique by DCA rule, not by a database constraint.
+
 ## Safety anchor (since 1.1)
 
 An email change does not require a password – whoever hijacks an open profile session could
@@ -123,9 +140,12 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
 
 - **Anchor, not the core `OptIn`:** dedicated, SQL-only columns on `tl_member`
   (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`,
-  `emailChangeAnchorNotified`) instead of the
+  `emailChangeAnchorNotified`, `emailChangeAnchorPending`) instead of the
   core opt-in mechanism, whose validity window is hard-coded differently per Contao version.
-  Only the SHA-256 hash of the token is stored; the plaintext only ever exists in the mail.
+  The SHA-256 hash of the token is stored; the plaintext lives in the mail and – only for as
+  long as a send is still pending – also in `emailChangeAnchorPending` (the core's own
+  `tl_opt_in` stores confirmation links in plaintext the same way). It is cleared again the
+  moment the mail goes out.
 - **Chain rule:** if a still-valid anchor already exists at the next confirmed change, it stays
   untouched – otherwise an attacker who just took over the account could overwrite the real
   anchor with a second change and erase the original owner's own way back in. The oldest valid
@@ -144,12 +164,12 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   and password are a security function and must not fail over it; the username then stays as it is
   and the operator gets a log entry. Every failure shows the exact same generic message, regardless
   of the reason - a purely technical one included.
-- **A lost notice:** only the hash is stored, the plaintext link exists nowhere but in the mail. A
-  failed send would leave the only way back unusable, so `emailChangeAnchorNotified` is set only
-  once the mail really went out; an hourly cron issues a **new** link for valid, unnotified anchors
-  (new hash, same target address, **same deadline** - the window is never extended). When that cron
-  runs on the CLI, `framework.router.default_uri` has to be set, otherwise the command line does
-  not know the site's domain.
+- **A lost notice:** a failed send would leave the only way back unusable, so
+  `emailChangeAnchorNotified` is set only once the mail really went out; an hourly cron re-sends
+  the **same** already-issued link (from `emailChangeAnchorPending`) for valid, unnotified anchors
+  - the deadline is never extended and the link never rotated, a duplicate send of the same link
+  is harmless. When that cron runs on the CLI, `framework.router.default_uri` has to be set,
+  otherwise the command line does not know the site's domain.
 - **Locking protocol:** confirmation and revocation follow the same steps - transaction, member row
   lock (`SELECT ... FOR UPDATE`), then re-read everything freshly and with locking reads, then
   commit link consumption, address, username, anchor and the cleanup of pending tokens together.

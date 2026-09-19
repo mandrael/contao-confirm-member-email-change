@@ -5,11 +5,10 @@ declare(strict_types=1);
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername;
 
 use Contao\CoreBundle\DependencyInjection\Attribute\AsCallback;
-use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\DataContainer;
 use Contao\FrontendUser;
-use Contao\MemberModel;
 use Contao\ModulePersonalData;
+use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
@@ -29,15 +28,24 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  *   callback); during registration the row is then never inserted at all. An UNCHANGED
  *   ineligible address does NOT throw – a legacy member has to stay editable.
  *
- * - onSubmitMember() is the config.onsubmit callback and does the WRITING, back end only.
- *   It cannot live in the field callback: DC_Table runs field save callbacks BEFORE the
+ * - onSubmitMember() is the config.onsubmit callback and does the WRITING, for both the
+ *   back end and, since Runde 2 Befund 4(a), the front-end "personal data" save. It
+ *   cannot live in the field callback: DC_Table runs field save callbacks BEFORE the
  *   email uniqueness check (core 5.3 DC_Table.php:3351-3370), so a username written there
  *   would outlive an email change that is rejected a moment later. onsubmit runs after
  *   the row was written and after the current-record cache was dropped, so
- *   getCurrentRecord() returns the address that actually got saved. The front end
- *   deliberately does not write: there the address only moves once the change is
- *   confirmed (ConfirmEmailChangeController), and "email unchanged" is indistinguishable
- *   from a pending change.
+ *   getCurrentRecord() returns the address that actually got saved. On the front end it
+ *   runs AFTER EmailChangeListener::onSubmit() (priority 255 vs. 0, descending), whose
+ *   own save_callback already suppressed the write of any pending new address – so
+ *   $user->email here is always the address that is really committed at this moment,
+ *   never a pending one (Runde 2, Befund 4(a) resolved that way, not by writing early).
+ *
+ * Both write paths go through a single UPDATE conditioned on `id = ? AND email = ?`
+ * using the address just read (Runde 2, Befund 3, blockierend): a Model::save() call
+ * here would write unconditionally and could overwrite a login name set moments earlier
+ * by a confirmed or revoked change that raced this very save. Zero affected rows simply
+ * means the address changed in between – nothing to do, the next save (or
+ * member-email:sync-usernames) catches it.
  */
 final class UsernameSyncListener
 {
@@ -45,7 +53,7 @@ final class UsernameSyncListener
         private readonly EmailAsUsernamePolicy $policy,
         private readonly UsernamePolicy $usernamePolicy,
         private readonly TranslatorInterface $translator,
-        private readonly ContaoFramework $framework,
+        private readonly Connection $connection,
         private readonly LoggerInterface|null $logger = null,
     ) {
     }
@@ -79,22 +87,38 @@ final class UsernameSyncListener
     }
 
     #[AsCallback(table: 'tl_member', target: 'config.onsubmit', priority: 0)]
-    public function onSubmitMember(mixed $dc = null): void
+    public function onSubmitMember(mixed $dc = null, mixed $module = null): void
     {
-        // ModulePersonalData passes (FrontendUser, ModulePersonalData) here; only the
-        // back end writes, see the class docblock.
-        if (!$dc instanceof DataContainer || !$this->policy->isEnabled()) {
+        if (!$this->policy->isEnabled()) {
             return;
         }
 
-        $record = $dc->getCurrentRecord();
+        if ($dc instanceof DataContainer) {
+            $record = $dc->getCurrentRecord();
 
-        if (null === $record || !isset($record['id'], $record['email'])) {
-            return; // A failed read must never end up writing a default value.
+            if (null === $record || !isset($record['id'], $record['email'])) {
+                return; // A failed read must never end up writing a default value.
+            }
+
+            $this->syncUsername((int) $record['id'], (string) $record['email'], (string) ($record['username'] ?? ''));
+
+            return;
         }
 
-        $memberId = (int) $record['id'];
-        $email = trim((string) $record['email']);
+        if ($dc instanceof FrontendUser && $module instanceof ModulePersonalData) {
+            $this->syncUsername((int) $dc->id, (string) $dc->email, (string) $dc->username);
+        }
+    }
+
+    /**
+     * $email is the address just read from the current save (back end: getCurrentRecord()
+     * after the write; front end: $user->email, which EmailChangeListener already pinned
+     * to the saved value even while a change is pending) – the conditional UPDATE below
+     * writes only if that exact address still stands.
+     */
+    private function syncUsername(int $memberId, string $email, string $currentUsername): void
+    {
+        $email = trim($email);
 
         if ('' === $email) {
             return;
@@ -104,30 +128,25 @@ final class UsernameSyncListener
 
         // Exact match against the canonical form, NOT strcasecmp: "Anna@example.com" as a
         // login name is not in sync, the rule demands the lower-cased address.
-        if ($canonical === (string) ($record['username'] ?? '')) {
+        if ($canonical === $currentUsername) {
             return;
         }
 
         if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($email, $memberId)) {
-            // Only reachable for an address that was already stored before the switch went
-            // on – onSaveEmail() rejects every CHANGED ineligible address. Saving the
+            // Runde 2, Befund 4: the other of the two DELIBERATE exceptions to "username IS
+            // the email" (the other is RevokeEmailChangeController's colliding-restore
+            // case). Only reachable for an address that was already stored before the switch
+            // went on – onSaveEmail() rejects every CHANGED ineligible address. Saving the
             // member must not fail over it, so the login name simply stays behind.
             $this->logger?->warning(\sprintf('Member ID %d keeps its previous login name: the stored address is not eligible as one.', $memberId));
 
             return;
         }
 
-        $member = $this->framework->getAdapter(MemberModel::class)->findByPk($memberId);
-
-        if (null === $member) {
-            return;
-        }
-
-        // NOT setRow(): that replaces the whole row and marks nothing as modified, so the
-        // following save() would write nothing and strip the model of its id (core 5.3
-        // Model.php:376-393,547-568).
-        $member->username = $canonical;
-        $member->save();
+        $this->connection->executeStatement(
+            'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND email = ?',
+            [$canonical, time(), $memberId, $email],
+        );
     }
 
     /**

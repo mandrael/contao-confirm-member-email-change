@@ -7,6 +7,7 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\Controller;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\Email;
+use Contao\StringUtil;
 use Contao\TestCase\ContaoTestCase;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\ConfirmEmailChangeController;
@@ -82,6 +83,33 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
     }
 
     /**
+     * Runde 2, Hinweis (Codex): the member/token relation is re-verified from the freshly
+     * locked tl_opt_in row, not trusted from the pre-lock read that determined which
+     * member row to lock in the first place.
+     */
+    public function testARelatedRecordsMismatchUnderTheLockIsRejected(): void
+    {
+        $connection = $this->connection(tokenRow: [
+            'confirmedOn' => 0,
+            'invalidatedThrough' => '',
+            'createdOn' => time(),
+            'email' => 'new@example.com',
+            'relatedRecords' => 'a:1:{s:9:"tl_member";a:1:{i:0;i:99;}}',
+        ]);
+
+        $optInToken = $this->optInToken();
+        $optInToken->expects(self::never())->method('confirm');
+
+        $response = $this->invokeController($connection, optInToken: $optInToken);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.invalid', (string) $response->getContent());
+        self::assertSame([], $this->statements);
+        self::assertContains('rollBack', $this->log);
+        self::assertNotContains('commit', $this->log);
+    }
+
+    /**
      * A6: a still-open core password-reset link for the OLD address must die with a
      * successful confirmation, so it cannot be used to take over the recovery channel.
      */
@@ -130,10 +158,12 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         $anchor = $this->statementsContaining('emailChangeAnchorHash = ?')[0] ?? null;
         self::assertNotNull($anchor);
         self::assertStringContainsString('emailChangeAnchorNotified = 0', $anchor['sql']);
-        self::assertSame(hash('sha256', $sent[2]), $anchor['params'][0], 'only the hash is stored, the plaintext goes into the mail');
+        self::assertSame(hash('sha256', $sent[2]), $anchor['params'][0], 'the hash is stored for lookup');
         self::assertSame('old@example.com', $anchor['params'][1]);
         self::assertGreaterThanOrEqual($before + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $anchor['params'][2]);
         self::assertLessThanOrEqual($after + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $anchor['params'][2]);
+        self::assertStringContainsString('emailChangeAnchorPending = ?', $anchor['sql']);
+        self::assertSame($sent[2], $anchor['params'][3], 'the plaintext is stashed for the pending-send window (Runde 2, Befund 2)');
         self::assertSame([7, 'old@example.com'], [$sent[0], $sent[1]]);
     }
 
@@ -280,6 +310,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
                     'invalidatedThrough' => '',
                     'createdOn' => time(),
                     'email' => 'new@example.com',
+                    'relatedRecords' => 'a:1:{s:9:"tl_member";a:1:{i:0;i:7;}}',
                 ],
             ],
             ['COUNT(*)' => 0],
@@ -319,7 +350,13 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         LoggerInterface|null $logger = null,
     ): Response {
         $email ??= $this->createPartialMock(Email::class, ['sendTo']);
-        $framework = $this->createContaoFrameworkMock([], [Email::class => $email]);
+
+        $stringUtilAdapter = $this->createAdapterMock(['deserialize']);
+        $stringUtilAdapter->method('deserialize')->willReturnCallback(
+            static fn (mixed $value): array => \is_string($value) ? unserialize($value, ['allowed_classes' => false]) : [],
+        );
+
+        $framework = $this->createContaoFrameworkMock([StringUtil::class => $stringUtilAdapter], [Email::class => $email]);
 
         $optIn = $this->createMock(OptIn::class);
         $optIn->expects(self::once())->method('find')->with('email-abc123')->willReturn($optInToken ?? $this->optInToken());
