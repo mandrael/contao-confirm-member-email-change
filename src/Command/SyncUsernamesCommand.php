@@ -18,11 +18,12 @@ use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
- * A5: the only way to move a member onto "email as username" that already
- * has a DIFFERENT ("fantasy") username – the automatic sync (A3) deliberately
- * never touches those. Defaults to a dry run; never prints an email address
- * or username, only member IDs and the case class, so operators can pipe the
- * output without leaking data.
+ * A5: bulk-fixes every member whose username does not yet match their email
+ * (typically pre-existing "fantasy" usernames from before the switch was
+ * turned on) in one pass, instead of waiting for each member's next save to
+ * trigger the automatic sync (A3). Defaults to a dry run; never prints an
+ * email address or username, only member IDs and the case class, so
+ * operators can pipe the output without leaking data.
  */
 #[AsCommand(
     name: 'member-email:sync-usernames',

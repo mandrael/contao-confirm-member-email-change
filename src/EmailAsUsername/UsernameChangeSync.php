@@ -7,7 +7,7 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername;
 use Contao\MemberModel;
 
 /**
- * Re-applies the A2/A3 username-follow rule after a PROGRAMMATIC email write that
+ * Re-applies the A2/A3 username sync after a PROGRAMMATIC email write that
  * bypasses DCA save_callbacks. Used by ConfirmEmailChangeController (forward: old
  * email -> new email) and, per A8, by RevokeEmailChangeController (backward: the
  * compromised email -> the restored old address) - the rule is identical either way,
@@ -43,22 +43,17 @@ final class UsernameChangeSync
 
     /**
      * Pure decision: what tl_member.username SHOULD become once $currentEmail is
-     * replaced by $newEmail, or null if it must stay untouched. Null covers three
-     * cases: the opt-in (A1) is off and no email-as-username extension is active, a
-     * "fantasy" username that never followed the email to begin with (A3), or
-     * $newEmail is not eligible as a username (A2, e.g. collision).
+     * replaced by $newEmail, or null if it must stay untouched. Null covers two
+     * cases: the opt-in (A1) is off and no email-as-username extension is active, or
+     * $newEmail is not eligible as a username (A2, e.g. collision) - the username
+     * always follows the email, there is no "fantasy" username to protect anymore.
      *
-     * Note the terminal42/contao-mailusername fallback deliberately skips the
-     * follow-rule check: that extension is a pure verbatim sync with no login
-     * decorator, so the username MUST follow or login with the new address breaks.
+     * $currentUsername/$currentEmail are unused now that the follow-rule guard is
+     * gone; kept for a stable signature (both call sites already have them at hand).
      */
     public function resolve(?string $currentUsername, string $currentEmail, string $newEmail, int $excludeMemberId): ?string
     {
         if ($this->policy->isEnabled()) {
-            if (!UsernameFollowRule::shouldFollow($currentUsername, $currentEmail)) {
-                return null; // A "fantasy" username stays untouched.
-            }
-
             if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($newEmail, $excludeMemberId)) {
                 return null; // Not eligible as a username - do not fail the whole caller over it.
             }

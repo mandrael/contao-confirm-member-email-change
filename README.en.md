@@ -60,14 +60,21 @@ governs the login name:
   64 characters, passing Contao's own `extnd` character check (which excludes, among others,
   `# < > ( ) \ =`), and only if no other member already carries that name. If the address does not
   qualify, **saving the email is rejected** ("This address cannot be used as a login name").
-- **Follow rule:** the username follows **automatically only** if it is empty or (case-insensitively)
-  matches the previous email address – on registration, in the self-service profile, and after a
-  confirmed email change. An already **different ("fantasy") username is NEVER overwritten
-  automatically.**
+- **Follow rule:** the username **always** follows the current email address – on registration, in
+  the self-service profile, on a back end edit, and after a confirmed email change. An already
+  different username is corrected the next time the member is saved; the one exception is a still
+  **unconfirmed** email change - there the username stays at the old, still-valid address until it
+  is confirmed.
+- **The username field itself is no longer editable:** neither in the back end nor in a front end
+  module (self-service profile, registration) - even if a module still has "username" configured
+  as an editable field from before the switch was turned on.
+- **Login form:** shows "Email address" instead of "Username" as the label, so members know what
+  to log in with (label only, the form field is technically still named `username`).
 - **Login with a different case:** if no member carries the exact typed username, the login also
   tries the lowercased variant (public site only, only when the input contains an "@") – an
   existing, differently-cased username is never shadowed by this.
-- **Existing members with a different username** are only migrated via the console command:
+- **Existing members with a different username** are corrected automatically the next time they
+  are saved; to fix the whole existing database in one go, there is the console command:
 
   ```bash
   # Dry run (default) – prints only the ID and case class per member, no emails/usernames

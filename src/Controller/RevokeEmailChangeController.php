@@ -139,7 +139,7 @@ class RevokeEmailChangeController
                 return $this->invalidPage();
             }
 
-            // Same follow rule as ConfirmEmailChangeController, just backwards: the
+            // Same sync as ConfirmEmailChangeController, just backwards: the
             // "current" email is the (possibly compromised) address being replaced,
             // the "new" one is the address being restored.
             $newUsername = $this->usernameChangeSync->resolve(

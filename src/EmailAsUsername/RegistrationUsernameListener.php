@@ -15,15 +15,15 @@ use Contao\System;
  * A3 (bullet 2): registration. ModuleRegistration inserts the new row itself
  * and does not honour DCA save_callbacks for it (see the core source), so
  * this hooks in afterwards – the same pattern terminal42/contao-mailusername
- * uses (recordUsername). Only ever fills an EMPTY username: a value the
- * registrant actually typed (because "username" was still an editable field)
- * is a deliberate choice and is left alone, matching A3's follow rule.
+ * uses (recordUsername). Only ever fills an EMPTY username: with the field
+ * locked (see UsernameFieldLockListener), it always is.
  *
  * Also removes "username" from the editable-fields option list of tl_module
  * (personalData/registration) while the switch is on, so new module configs
- * cannot pick it – an ALREADY configured module keeps rendering it (no hook
- * point exists to strip that retroactively); the save-time guard above still
- * applies regardless.
+ * cannot pick it in the first place – purely cosmetic now that
+ * UsernameFieldLockListener stops an ALREADY configured module from
+ * rendering/saving it either way, but still saves the admin from picking a
+ * field that would do nothing.
  */
 final class RegistrationUsernameListener
 {

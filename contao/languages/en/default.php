@@ -31,6 +31,10 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'This email ad
 // A2 (email as username opt-in): rejection when the address cannot be used as a login name
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['usernameRejected'] = 'This address cannot be used as a login name.';
 
+// A7 (email as username opt-in): username field label on the login form (there only, see
+// LoginLabelListener - not MSC.username, that one is global).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['loginUsernameLabel'] = 'Email address';
+
 // A8: security anchor - second notice to the old address AFTER confirmation.
 // %d = validity in days (EmailChangeAnchorPolicy::ttlDays()), %s = revoke link.
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeSubject'] = 'Your email address has been changed';

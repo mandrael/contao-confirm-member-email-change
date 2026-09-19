@@ -61,16 +61,23 @@ gilt für den Login-Namen ausschließlich diese Regel:
   höchstens 64 Zeichen, Contaos eigener `extnd`-Zeichenprüfung (das schließt u. a. `# < > ( ) \ =` aus)
   und wenn kein anderes Mitglied diesen Namen bereits trägt. Passt die Adresse nicht, wird das
   **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden").
-- **Folgeregel:** Der Benutzername folgt **automatisch nur**, wenn er leer ist oder (ohne
-  Berücksichtigung von Groß-/Kleinschreibung) der bisherigen E-Mail-Adresse entspricht – bei der
-  Registrierung, im Self-Service-Profil und nach einer bestätigten E-Mail-Änderung. Ein bereits
-  **abweichender („Fantasie"-)Benutzername wird NIE automatisch überschrieben.**
+- **Folgeregel:** Der Benutzername folgt **immer** der aktuellen E-Mail-Adresse – bei der
+  Registrierung, im Self-Service-Profil, bei Backend-Bearbeitung und nach einer bestätigten
+  E-Mail-Änderung. Ein bereits abweichender Benutzername wird beim nächsten Speichern des
+  Mitglieds korrigiert; einzige Ausnahme ist eine noch **unbestätigte** E-Mail-Änderung – dort
+  bleibt der Benutzername bis zur Bestätigung an der alten, noch gültigen Adresse.
+- **Das Benutzername-Feld selbst ist nicht mehr editierbar:** weder im Backend noch in einem
+  Frontend-Modul (Self-Service-Profil, Registrierung) – auch dann nicht, wenn ein Modul
+  „username" noch aus der Zeit vor dem Einschalten als editierbares Feld konfiguriert hat.
+- **Login-Formular:** Zeigt statt „Benutzername" die Beschriftung „E-Mail-Adresse", damit
+  Mitglieder wissen, womit sie sich anmelden (nur die Beschriftung, das Formularfeld heißt
+  technisch weiterhin `username`).
 - **Login mit abweichender Schreibweise:** Existiert kein Mitglied mit dem exakt eingegebenen
   Benutzernamen, wird beim Anmelden zusätzlich die kleingeschriebene Variante gesucht (nur an der
   öffentlichen Website, nur wenn die Eingabe ein „@" enthält) – ein bestehender, anders
   geschriebener Benutzername wird dabei nie verdeckt.
-- **Bestandsmitglieder mit abweichendem Benutzernamen** werden ausschließlich über den
-  Konsolenbefehl umgestellt:
+- **Bestandsmitglieder mit abweichendem Benutzernamen** korrigiert der automatische Abgleich beim
+  nächsten Speichern von selbst; für den gesamten Bestand auf einmal gibt es den Konsolenbefehl:
 
   ```bash
   # Probelauf (Standard) – zeigt je Mitglied nur ID und Fallklasse, keine E-Mail-Adressen/Namen

@@ -15,19 +15,24 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 /**
  * A3 (bullet 1): keeps tl_member.username in sync with tl_member.email
  * whenever the switch (A1) is on – for back end admin edits AND the front
- * end "personal data" module.
+ * end "personal data" module. The username always follows the email; there
+ * is no "fantasy" (deliberately chosen) username to protect anymore.
  *
  * Runs at LOW priority so it always receives the value already RETURNED by
  * EmailChangeListener::onSaveEmail() (priority 255), never Input::post():
  * during a pending front-end email change that returned value is still the
- * OLD address, so this listener sees "no effective change" and does nothing
- * – the real sync for that case happens in ConfirmEmailChangeController once
- * the change is confirmed (A3 bullet 3).
+ * OLD address, so this listener sees "no effective change" on the FRONT END
+ * and does nothing – the real sync for that case happens in
+ * ConfirmEmailChangeController once the change is confirmed (A3 bullet 3).
  *
  * For a back end admin edit there is no such interception, so $value here IS
- * the new address, and – if the username is eligible to follow (A2/A3) – is
- * written directly, because a fields.email.save callback can only return the
- * EMAIL value, never a sibling field.
+ * the new address, and – if it is eligible (A2) – is written directly,
+ * because a fields.email.save callback can only return the EMAIL value,
+ * never a sibling field. A back end save ALSO corrects a stale username even
+ * when the email itself did not change (e.g. the switch was only just turned
+ * on) – the front end deliberately does not, to keep the pending-change case
+ * above safe: there, "no effective change" is indistinguishable from a
+ * genuinely unchanged email.
  */
 final class UsernameSyncListener
 {
@@ -54,14 +59,20 @@ final class UsernameSyncListener
             return $value;
         }
 
-        if (!UsernameFollowRule::shouldFollow($currentUsername, $oldEmail)) {
-            return $value; // A "fantasy" username stays untouched.
-        }
-
         $newEmail = (string) $value;
 
-        if ('' === $newEmail || 0 === strcasecmp($newEmail, $oldEmail)) {
-            return $value; // No effective change (or the FE pending-case, see class docblock).
+        if ('' === $newEmail) {
+            return $value;
+        }
+
+        if (0 === strcasecmp($newEmail, $oldEmail)) {
+            if (!$arg2 instanceof DataContainer) {
+                return $value; // FE: no effective change (or the pending case, see class docblock).
+            }
+
+            if (0 === strcasecmp((string) $currentUsername, CanonicalUsername::normalize($newEmail))) {
+                return $value; // BE: already in sync, nothing to correct.
+            }
         }
 
         $reason = $this->usernamePolicy->evaluate($newEmail, $memberId);

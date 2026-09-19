@@ -34,14 +34,18 @@ class UsernameChangeSyncTest extends ContaoTestCase
         self::assertSame('johndoe', $member->username);
     }
 
-    public function testFantasyUsernameIsNeverOverwrittenWhenEnabled(): void
+    /**
+     * A "fantasy" username no longer survives - the follow rule that protected it was
+     * deliberately removed (Auftraggeber, 19.09.2026: username IS email, hard requirement).
+     */
+    public function testOverwritesAFantasyUsernameWhenEnabled(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::never())->method('evaluate');
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('new@example.com', 7)->willReturn(EligibilityReason::Eligible);
 
         $resolved = $this->sync(enabled: true, usernamePolicy: $usernamePolicy)->resolve('johndoe', 'old@example.com', 'new@example.com', 7);
 
-        self::assertNull($resolved);
+        self::assertSame('new@example.com', $resolved);
     }
 
     public function testResolvesTheCanonicalUsernameWhenEmptyAndEligible(): void
@@ -82,12 +86,11 @@ class UsernameChangeSyncTest extends ContaoTestCase
     }
 
     /**
-     * terminal42/contao-mailusername fallback: verbatim sync with NO follow-rule
-     * guard (the extension has no login decorator, so the username MUST follow or
-     * login with the new address breaks) - simulated here via the opt-in switch off
-     * and no extension class present, which is the only branch reachable in a test
-     * environment without the extension installed; the guard-skip itself is
-     * documented on UsernameChangeSync::resolve().
+     * terminal42/contao-mailusername fallback: verbatim sync (the extension has no
+     * login decorator, so the username MUST follow or login with the new address
+     * breaks) - simulated here via the opt-in switch off and no extension class
+     * present, which is the only branch reachable in a test environment without the
+     * extension installed.
      */
     public function testReturnsNullWhenSwitchIsOffAndNoExtensionIsActiveEvenForAFantasyUsername(): void
     {

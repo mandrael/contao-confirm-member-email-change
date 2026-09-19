@@ -57,15 +57,64 @@ class UsernameSyncListenerTest extends ContaoTestCase
         self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $user, $module));
     }
 
-    public function testFantasyUsernameIsNeverTouched(): void
+    /**
+     * A "fantasy" username no longer survives - the follow rule that protected it was
+     * deliberately removed (Auftraggeber, 19.09.2026: username IS email, hard requirement).
+     */
+    public function testOverwritesAFantasyUsernameWhenTheEmailChanges(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
+
+        $member = $this->createMock(MemberModel::class);
+        $member->expects(self::once())->method('setRow')->with(['username' => 'new@example.com'])->willReturn($member);
+        $member->expects(self::once())->method('save');
+
+        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+
+        $listener = $this->listener(true, $usernamePolicy, $framework);
+        $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
+
+        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
+    }
+
+    /**
+     * BE only: even when the email itself is unchanged, a stale/mismatched username is
+     * corrected (e.g. the switch was only just turned on) - the early "no effective change"
+     * exit must not shield a mismatched username from being fixed.
+     */
+    public function testFixesAMismatchedUsernameOnTheBackEndEvenWhenTheEmailIsUnchanged(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('old@example.com', 7)->willReturn(EligibilityReason::Eligible);
+
+        $member = $this->createMock(MemberModel::class);
+        $member->expects(self::once())->method('setRow')->with(['username' => 'old@example.com'])->willReturn($member);
+        $member->expects(self::once())->method('save');
+
+        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+
+        $listener = $this->listener(true, $usernamePolicy, $framework);
+        $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
+
+        self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $dc));
+    }
+
+    /**
+     * A1: the switch off leaves a mismatched username untouched too - not just an actual
+     * email change, part of "Schalter aus = 1.0-Verhalten unverändert".
+     */
+    public function testDoesNothingWhenTheSwitchIsOffEvenWithAMismatchedUsername(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::never())->method('evaluate');
 
-        $listener = $this->listener(true, $usernamePolicy);
+        $listener = $this->listener(false, $usernamePolicy);
         $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
 
-        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
+        self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $dc));
     }
 
     public function testRejectsTheSaveWhenTheAddressIsNotEligible(): void
