@@ -93,6 +93,36 @@ Either the built-in opt-in above **or** one of the following extensions – not 
 With the built-in opt-in off and neither extension active, `tl_member.username` is left
 untouched – unchanged from 1.0.
 
+## Safety anchor (since 1.1)
+
+An email change does not require a password – whoever hijacks an open profile session could
+otherwise redirect the account's recovery channel to themselves, with the old address getting
+nothing more than a consequence-free notice. So a **confirmed** change now also creates a
+**safety anchor**: the old address gets a second mail with a link that can undo the change for
+14 days.
+
+- **Anchor, not the core `OptIn`:** dedicated, SQL-only columns on `tl_member`
+  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`) instead of the
+  core opt-in mechanism, whose validity window is hard-coded differently per Contao version.
+  Only the SHA-256 hash of the token is stored; the plaintext only ever exists in the mail.
+- **Chain rule:** if a still-valid anchor already exists at the next confirmed change, it stays
+  untouched – otherwise an attacker who just took over the account could overwrite the real
+  anchor with a second change and erase the original owner's own way back in. The oldest valid
+  anchor wins and points back to the address BEFORE the chain. The old address of an
+  in-between change gets the same notice, but **without** a link – it might belong to the
+  attacker.
+- **Revocation:** a `GET` on the link shows only a confirmation page (so a mail scanner
+  pre-fetching links triggers nothing); only a `POST` with Contao's usual form token actually
+  performs the change – under a row lock (`SELECT ... FOR UPDATE`) and a transaction, re-checking
+  the hash, expiry, and whether the address to be restored meanwhile belongs to someone else. On
+  success: the old address is restored, the username is carried back via the same follow rule as
+  above, the password is invalidated (the `login` field is never touched – that stays the
+  operator's call), every unconfirmed opt-in token of the member is deleted, and a currently
+  logged-in session of that same member is logged out. Every failure shows the exact same
+  generic message, regardless of the reason.
+- **Cleanup:** a daily cron clears expired anchor fields so old addresses don't linger in
+  `tl_member` indefinitely.
+
 ## Compatibility
 
 | | Version |

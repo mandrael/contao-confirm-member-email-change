@@ -17,6 +17,7 @@
     "require": {
         "php": "^8.1",
         "contao/core-bundle": "^5.3",
+        "doctrine/dbal": "^3.7 || ^4.3",
         "symfony/config": "^6.4 || ^7.0",
         "symfony/console": "^6.4 || ^7.0",
         "symfony/dependency-injection": "^6.4 || ^7.0",
@@ -56,7 +57,6 @@
         "contao-manager-plugin": "Mandrael\\ContaoConfirmMemberEmailChangeBundle\\ContaoManager\\Plugin"
     },
     "suggest": {
-        "terminal42/contao-mailusername": "Login mit der E-Mail-Adresse als Benutzername; dieses Bundle hält den Benutzernamen bei einer bestätigten E-Mail-Änderung synchron (empfohlen).",
-        "heimrichhannot/contao-email2username-bundle": "Alternative für Login mit der E-Mail-Adresse; ebenfalls voll kompatibel (entweder/oder zu terminal42, nicht beide)."
+        "terminal42/contao-mailusername": "Externe Alternative für Login mit der E-Mail-Adresse; dieses Bundle hält den Benutzernamen bei einer bestätigten E-Mail-Änderung synchron. NICHT gleichzeitig mit dem eigenen Schalter memberEmailAsUsername (System-Einstellungen) aktivieren – beide schreiben tl_member.username."
     }
 }

@@ -9,19 +9,18 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenAlreadyConfirmedException;
 use Contao\CoreBundle\OptIn\OptInTokenNoLongerValidException;
+use Contao\Email;
 use Contao\FrontendUser;
 use Contao\MemberModel;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\CanonicalUsername;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameFollowRule;
-use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Attribute\AsController;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
@@ -50,9 +49,9 @@ class ConfirmEmailChangeController
         private readonly TranslatorInterface $translator,
         private readonly RequestStack $requestStack,
         private readonly Security $security,
-        private readonly EmailAsUsernamePolicy $emailAsUsernamePolicy,
-        private readonly UsernamePolicy $usernamePolicy,
+        private readonly UsernameChangeSync $usernameChangeSync,
         private readonly UnconfirmedTokenPurger $tokenPurger,
+        private readonly UrlGeneratorInterface $urlGenerator,
     ) {
     }
 
@@ -115,6 +114,22 @@ class ConfirmEmailChangeController
         }
 
         $usernameChanged = $this->syncUsername($member, $newEmail);
+        $oldEmail = (string) $member->email;
+
+        // A8: a security anchor lets the OLD address undo the change on its own. Keep
+        // an existing, still-valid anchor UNTOUCHED (chain rule) – only the oldest
+        // valid anchor may ever point back further than one hop, otherwise an
+        // attacker who just took over the account could overwrite it with a second
+        // change and erase the real owner's own way back in.
+        $revokeToken = null;
+
+        if (!EmailChangeAnchorPolicy::hasValidAnchor((string) $member->emailChangeAnchorHash, (int) $member->emailChangeAnchorExpires, time())) {
+            $revokeToken = bin2hex(random_bytes(32));
+            $member->emailChangeAnchorHash = EmailChangeAnchorPolicy::hashToken($revokeToken);
+            $member->emailChangeAnchorEmail = $oldEmail;
+            $member->emailChangeAnchorExpires = time() + EmailChangeAnchorPolicy::TTL_SECONDS;
+        }
+
         $member->email = $newEmail;
         // A programmatic save persists the row but does not bump tstamp on its own,
         // so set it explicitly – matching how the core personal-data save behaves.
@@ -126,6 +141,8 @@ class ConfirmEmailChangeController
         foreach (self::REVOKE_ON_CONFIRM_PREFIXES as $prefix) {
             $this->tokenPurger->purge((int) $member->id, $prefix);
         }
+
+        $this->notifyOldAddressAfterConfirm($oldEmail, $revokeToken);
 
         $response = $this->page('success', false);
 
@@ -142,39 +159,44 @@ class ConfirmEmailChangeController
     /**
      * The programmatic write above does not fire any DCA save_callback, so neither the
      * bundle's own opt-in sync (A2/A3) nor an active email-as-username extension would
-     * update the username on its own – both are re-applied here explicitly.
+     * update the username on its own – both are re-applied here via the shared
+     * UsernameChangeSync (also used, in the opposite direction, by
+     * RevokeEmailChangeController).
      *
      * @return bool whether the username was changed
      */
     private function syncUsername(MemberModel $member, string $newEmail): bool
     {
-        if ($this->emailAsUsernamePolicy->isEnabled()) {
-            $oldEmail = (string) $member->email;
+        return $this->usernameChangeSync->apply($member, $newEmail);
+    }
 
-            if (!UsernameFollowRule::shouldFollow($member->username, $oldEmail)) {
-                return false; // A "fantasy" username stays untouched.
-            }
+    /**
+     * A8: the second notice to the old address, sent only AFTER confirmation (the
+     * request-time notice from EmailChangeListener::notifyOldAddress() stays as-is,
+     * without a link). Carries the revoke link when a fresh anchor was just created;
+     * when the chain rule (see __invoke()) kept an earlier anchor instead, this old
+     * address gets the same wording WITHOUT a link – it might belong to the attacker.
+     */
+    private function notifyOldAddressAfterConfirm(string $oldEmail, ?string $revokeToken): void
+    {
+        $email = $this->framework->createInstance(Email::class);
+        $email->from = $GLOBALS['TL_ADMIN_EMAIL'] ?? null;
+        $email->fromName = $GLOBALS['TL_ADMIN_NAME'] ?? null;
+        $email->subject = $this->trans('confirmEmailChange.revokeNoticeSubject');
 
-            if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($newEmail, (int) $member->id)) {
-                return false; // Not eligible as a username – do not fail the whole confirmation over it.
-            }
+        if (null !== $revokeToken) {
+            $url = $this->urlGenerator->generate(
+                'mandrael_revoke_member_email_change',
+                ['token' => $revokeToken],
+                UrlGeneratorInterface::ABSOLUTE_URL,
+            );
 
-            $member->username = CanonicalUsername::normalize($newEmail);
-
-            return true;
+            $email->text = \sprintf($this->trans('confirmEmailChange.revokeNoticeText'), EmailChangeAnchorPolicy::ttlDays(), $url);
+        } else {
+            $email->text = $this->trans('confirmEmailChange.revokeNoticeChainedText');
         }
 
-        // terminal42/contao-mailusername: pure sync, NO login decorator → the
-        // username MUST follow (verbatim), otherwise login with the new address breaks.
-        // (heimrichhannot/contao-email2username-bundle is not supported: its 1.4.0
-        // relies on the "importUser" hook, which Contao 5 removed.)
-        if (class_exists(\Terminal42\MailusernameBundle\Terminal42MailusernameBundle::class)) {
-            $member->username = $newEmail;
-
-            return true;
-        }
-
-        return false;
+        $email->sendTo($oldEmail);
     }
 
     private function logoutFrontendUser(): ?Response

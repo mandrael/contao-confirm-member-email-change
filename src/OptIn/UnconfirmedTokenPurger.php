@@ -34,4 +34,22 @@ class UnconfirmedTokenPurger
             }
         }
     }
+
+    /**
+     * A8: deletes EVERY unconfirmed opt-in token of a member regardless of prefix.
+     * Used by RevokeEmailChangeController - a successful revoke means the account
+     * changed hands (back), so whatever "email"/"pw"/"mdacc"/... token happens to be
+     * pending must die, not just the ones a single purge(..., $prefix) call targets.
+     */
+    public function purgeAll(int $memberId): void
+    {
+        $tokens = $this->framework
+            ->getAdapter(OptInModel::class)
+            ->findUnconfirmedByRelatedTableAndId('tl_member', $memberId)
+        ;
+
+        foreach ($tokens ?? [] as $model) {
+            $model->delete();
+        }
+    }
 }

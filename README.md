@@ -96,6 +96,37 @@ dasselbe Feld):
 Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt
 `tl_member.username` unangetastet – unverändert gegenüber 1.0.
 
+## Sicherheitsanker (ab 1.1)
+
+Eine E-Mail-Änderung verlangt kein Kennwort – wer eine offene Profilsitzung kapert, könnte
+den Wiederherstellungskanal des Kontos sonst auf sich umstellen, ohne dass die alte Adresse
+mehr als eine folgenlose Benachrichtigung bekommt. Deshalb legt eine **bestätigte** Änderung
+zusätzlich einen **Sicherheitsanker** an: Die alte Adresse erhält eine zweite Mail mit einem
+Link, der die Änderung 14 Tage lang rückgängig machen kann.
+
+- **Anker, nicht Core-`OptIn`:** eigene, nur per SQL angelegte Felder an `tl_member`
+  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`) statt des
+  Core-Opt-in-Mechanismus, dessen Gültigkeit je Contao-Version unterschiedlich fest verdrahtet
+  ist. Gespeichert wird nur der SHA-256-Hash des Tokens, der Klartext steht ausschließlich in
+  der Mail.
+- **Ketten-Regel:** Existiert beim nächsten bestätigten Wechsel noch ein gültiger Anker, bleibt
+  er unverändert – sonst könnte ein Angreifer, der das Konto gerade übernommen hat, den echten
+  Anker mit einem zweiten Wechsel überschreiben und die Rückholmöglichkeit des ursprünglichen
+  Besitzers löschen. Der älteste gültige Anker gewinnt und führt auf die Adresse VOR der Kette.
+  Die alte Adresse eines zwischenzeitlichen Wechsels bekommt in diesem Fall dieselbe
+  Benachrichtigung, aber **ohne** Link – sie könnte dem Angreifer gehören.
+- **Widerruf:** Ein `GET` auf den Link zeigt nur eine Bestätigungsseite (ein Mail-Scanner, der
+  Links vorab abruft, löst dadurch nichts aus); erst ein `POST` mit Contaos üblichem
+  Formular-Token führt die Änderung durch – unter Zeilensperre (`SELECT … FOR UPDATE`) und
+  Transaktion, mit erneuter Prüfung von Hash, Ablauf und ob die wiederherzustellende Adresse
+  inzwischen einem anderen Konto gehört. Bei Erfolg: alte Adresse wiederhergestellt, Benutzername
+  nach derselben Folgeregel wie oben zurückgeführt, Kennwort ungültig gemacht (kein login-Feld
+  wird angetastet – das bleibt Betreiber-Sache), alle unbestätigten Opt-in-Token des Mitglieds
+  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Jeder Fehlschlag zeigt
+  dieselbe allgemeine Meldung, unabhängig vom Grund.
+- **Aufräumen:** Ein täglicher Cron leert abgelaufene Anker-Felder, damit alte Adressen nicht
+  unbegrenzt in `tl_member` liegen bleiben.
+
 ## Kompatibilität
 
 | | Version |

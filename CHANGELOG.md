@@ -23,6 +23,19 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Widerruft beim bestätigten E-Mail-Wechsel offene Core-Kennwort-Token (Präfix `pw`) des Mitglieds,
   damit ein alter Kennwort-Link nicht mehr auf die neue Adresse zielt.
 - Neues `tl_settings`-Feld samt Palette und deutscher/englischer Sprachdatei.
+- **Sicherheitsanker:** Eine bestätigte E-Mail-Änderung legt an `tl_member` einen Widerrufs-Anker
+  an (SHA-256-Hash des Tokens, alte Adresse, Ablaufzeit; neue SQL-only-Felder
+  `emailChangeAnchorHash`/`emailChangeAnchorEmail`/`emailChangeAnchorExpires`, kein Backend-Feld)
+  und schickt der alten Adresse eine zweite Mail mit einem 14 Tage gültigen Widerrufslink.
+  Ketten-Regel: Existiert bereits ein gültiger Anker, bleibt er beim nächsten bestätigten Wechsel
+  unverändert (der älteste gewinnt); die alte Adresse dieses zweiten Wechsels bekommt die
+  Benachrichtigung dann ohne Link. Einlösen über eine neue Route (`GET` zeigt nur ein
+  Bestätigungsformular, `POST` mit Contaos Formular-Token führt unter Zeilensperre und
+  Transaktion aus): stellt die alte Adresse wieder her (sofern nicht inzwischen anderweitig
+  vergeben), führt den Benutzernamen nach der bestehenden Folgeregel zurück, macht das Kennwort
+  über einen für alle Passwort-Hasher unverifizierbaren Wert ungültig (ohne `login` anzutasten),
+  löscht alle unbestätigten Opt-in-Token des Mitglieds und meldet eine laufende Sitzung ab. Jeder
+  Fehlschlag zeigt dieselbe allgemeine Meldung. Ein täglicher Cron räumt abgelaufene Anker auf.
 
 ### Geändert
 - `terminal42/contao-mailusername` bleibt als Rückfall unterstützt, solange der eingebaute Opt-in
