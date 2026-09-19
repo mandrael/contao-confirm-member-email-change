@@ -9,6 +9,7 @@ use Contao\CoreBundle\OptIn\OptIn;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -51,7 +52,7 @@ class EmailChangeListenerTest extends TestCase
      * The same DCA save_callback also runs during registration (as ($value, null))
      * and in the back end (as ($value, DataContainer)). Neither passes a
      * FrontendUser + ModulePersonalData, so the callback must return the value
-     * untouched and never create a token — a narrow typed signature would fatal here.
+     * untouched and never create a token – a narrow typed signature would fatal here.
      */
     public function testIgnoresRegistrationAndBackendInvocations(): void
     {
@@ -102,6 +103,7 @@ class EmailChangeListenerTest extends TestCase
             $this->createStub(TranslatorInterface::class),
             $this->createStub(UrlGeneratorInterface::class),
             $this->createStub(RequestStack::class),
+            $this->createStub(UnconfirmedTokenPurger::class),
         );
     }
 

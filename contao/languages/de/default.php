@@ -27,3 +27,6 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Zur Startseite
 
 // Ersetzt Contaos generische Unique-Meldung im FE-Profil
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'Diese E-Mail-Adresse existiert bereits.';
+
+// A2 (E-Mail als Benutzername, Opt-in): Ablehnung, wenn die Adresse nicht als Login-Name taugt
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['usernameRejected'] = 'Diese Adresse kann nicht als Login-Name verwendet werden.';

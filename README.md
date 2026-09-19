@@ -27,7 +27,7 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
 2. Ein `fields.email.save`-Callback (hohe Priorität) fängt die Änderung ab, erstellt einen
    Core-`OptIn`-Token und sendet einen Bestätigungslink an die **neue** Adresse. Die alte
    Adresse erhält eine Sicherheits-Benachrichtigung. Im Profil bleibt die **alte** Adresse
-   sichtbar (kein Lockout, Login unverändert möglich) — mit einem deutlichen grünen Hinweis,
+   sichtbar (kein Lockout, Login unverändert möglich) – mit einem deutlichen grünen Hinweis,
    dass die Änderung noch bestätigt werden muss.
 3. Mitglied öffnet den Link → ein schlanker Controller bestätigt den Token, schreibt die neue
    Adresse und – falls eine E-Mail-als-Username-Erweiterung aktiv ist – zieht den Benutzernamen
@@ -40,28 +40,61 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
 composer require mandrael/contao-confirm-member-email-change
 ```
 
-Das Bundle registriert sich über den Contao Manager Plugin automatisch — **keine weitere
+Das Bundle registriert sich über den Contao Manager Plugin automatisch – **keine weitere
 Konfiguration nötig**. Nach dem Klick auf den Bestätigungslink sieht das Mitglied eine kurze
 Bestätigungsseite. Ist ein E-Mail-Login aktiv (siehe unten), wird es dabei abgemeldet und
 meldet sich anschließend mit der neuen Adresse an.
 
 > **Technischer Hinweis:** Die Mails werden über den Symfony Mailer (`Contao\Email`) versendet.
-> Ist der Mailer — wie im Contao-Standard-Setup — an den Messenger angebunden, laufen sie
+> Ist der Mailer – wie im Contao-Standard-Setup – an den Messenger angebunden, laufen sie
 > asynchron über die Queue; dann muss ein Worker laufen (`contao:worker` bzw.
 > `messenger:consume`), sonst bleiben die Mails liegen. Bei synchronem Mailer-Transport
 > entfällt das.
 
-## Kompatibilität: E-Mail als Benutzername
+## E-Mail als Benutzername (Opt-in, ab 1.1)
 
-Es gilt **entweder/oder** – beide Erweiterungen lösen dieselbe Aufgabe und werden **nicht
-gemeinsam** installiert:
+Alternative zu einer separaten Erweiterung: In `Einstellungen → E-Mail als Benutzername` lässt
+sich **„E-Mail als Benutzername"** direkt in diesem Bundle einschalten (Standard: aus). Eingeschaltet,
+gilt für den Login-Namen ausschließlich diese Regel:
+
+- **Kanonische Regel:** Login-Name = kleingeschriebene, getrimmte E-Mail-Adresse – zulässig nur bei
+  höchstens 64 Zeichen, Contaos eigener `extnd`-Zeichenprüfung (das schließt u. a. `# < > ( ) \ =` aus)
+  und wenn kein anderes Mitglied diesen Namen bereits trägt. Passt die Adresse nicht, wird das
+  **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden").
+- **Folgeregel:** Der Benutzername folgt **automatisch nur**, wenn er leer ist oder (ohne
+  Berücksichtigung von Groß-/Kleinschreibung) der bisherigen E-Mail-Adresse entspricht – bei der
+  Registrierung, im Self-Service-Profil und nach einer bestätigten E-Mail-Änderung. Ein bereits
+  **abweichender („Fantasie"-)Benutzername wird NIE automatisch überschrieben.**
+- **Login mit abweichender Schreibweise:** Existiert kein Mitglied mit dem exakt eingegebenen
+  Benutzernamen, wird beim Anmelden zusätzlich die kleingeschriebene Variante gesucht (nur an der
+  öffentlichen Website, nur wenn die Eingabe ein „@" enthält) – ein bestehender, anders
+  geschriebener Benutzername wird dabei nie verdeckt.
+- **Bestandsmitglieder mit abweichendem Benutzernamen** werden ausschließlich über den
+  Konsolenbefehl umgestellt:
+
+  ```bash
+  # Probelauf (Standard) – zeigt je Mitglied nur ID und Fallklasse, keine E-Mail-Adressen/Namen
+  vendor/bin/contao-console member-email:sync-usernames
+
+  # Schreibt tatsächlich (vorher ein Datenbank-Backup anlegen)
+  vendor/bin/contao-console member-email:sync-usernames --force
+
+  # Auf eine Mitgliedergruppe begrenzen
+  vendor/bin/contao-console member-email:sync-usernames --group=3 --force
+  ```
+
+### Kompatibilität mit anderen E-Mail-als-Username-Erweiterungen
+
+Aktiv **oder** eine der folgenden Erweiterungen – nicht beides gleichzeitig (Doppel-Sync auf
+dasselbe Feld):
 
 | Erweiterung | Verhalten mit diesem Bundle |
 |---|---|
-| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) (empfohlen) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). |
-| [heimrichhannot/contao-email2username-bundle](https://github.com/heimrichhannot/contao-email2username-bundle) | Sync **+** Login-Decorator. Login funktioniert ohnehin; der Benutzername wird kosmetisch (lowercase) mitgezogen. |
+| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). Nur relevant, solange der eigene Opt-in oben **ausgeschaltet** ist. |
+| heimrichhannot/contao-email2username-bundle | **Nicht Contao-5-tauglich:** Version 1.4.0 nutzt den in Contao 5 entfernten `importUser`-Hook und wird daher nicht mehr unterstützt. |
 
-Ohne eine solche Erweiterung bleibt `tl_member.username` unangetastet.
+Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt
+`tl_member.username` unangetastet – unverändert gegenüber 1.0.
 
 ## Kompatibilität
 

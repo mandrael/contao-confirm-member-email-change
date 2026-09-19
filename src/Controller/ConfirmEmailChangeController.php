@@ -11,6 +11,12 @@ use Contao\CoreBundle\OptIn\OptInTokenAlreadyConfirmedException;
 use Contao\CoreBundle\OptIn\OptInTokenNoLongerValidException;
 use Contao\FrontendUser;
 use Contao\MemberModel;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\CanonicalUsername;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameFollowRule;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
@@ -19,8 +25,8 @@ use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
- * Consumes the double-opt-in token: confirms it, writes the new email and — when
- * an email-as-username extension is active — keeps tl_member.username in sync.
+ * Consumes the double-opt-in token: confirms it, writes the new email and – when
+ * an email-as-username extension is active – keeps tl_member.username in sync.
  *
  * It responds with a small self-contained page rather than redirecting into the
  * site: the identifier just changed, so the member's current session is stale, and
@@ -32,12 +38,21 @@ class ConfirmEmailChangeController
 {
     private const PREFIX = 'email';
 
+    /**
+     * Core password-reset opt-in prefix (ModuleLostPassword) – revoked per A6 once an
+     * email change is confirmed, so the old address can no longer complete a reset.
+     */
+    private const REVOKE_ON_CONFIRM_PREFIXES = ['pw', 'mdacc'];
+
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly OptIn $optIn,
         private readonly TranslatorInterface $translator,
         private readonly RequestStack $requestStack,
         private readonly Security $security,
+        private readonly EmailAsUsernamePolicy $emailAsUsernamePolicy,
+        private readonly UsernamePolicy $usernamePolicy,
+        private readonly UnconfirmedTokenPurger $tokenPurger,
     ) {
     }
 
@@ -81,7 +96,7 @@ class ConfirmEmailChangeController
 
         // Re-validate uniqueness at confirm time: two members could have requested
         // the same new address while both tokens were pending. This is a best-effort
-        // check, matching Contao's own guarantee — tl_member.email is DCA-unique but
+        // check, matching Contao's own guarantee – tl_member.email is DCA-unique but
         // not DB-unique (core allows duplicate emails), so a rare parallel double
         // confirm of the same address can still slip through. A DB UNIQUE constraint
         // is deliberately not added: it would break real installs with duplicates.
@@ -102,9 +117,15 @@ class ConfirmEmailChangeController
         $usernameChanged = $this->syncUsername($member, $newEmail);
         $member->email = $newEmail;
         // A programmatic save persists the row but does not bump tstamp on its own,
-        // so set it explicitly — matching how the core personal-data save behaves.
+        // so set it explicitly – matching how the core personal-data save behaves.
         $member->tstamp = time();
         $member->save();
+
+        // A6: the recovery channel just moved to the new address – a still-open core
+        // password-reset link for the OLD address must not be able to complete a reset.
+        foreach (self::REVOKE_ON_CONFIRM_PREFIXES as $prefix) {
+            $this->tokenPurger->purge((int) $member->id, $prefix);
+        }
 
         $response = $this->page('success', false);
 
@@ -119,32 +140,38 @@ class ConfirmEmailChangeController
     }
 
     /**
-     * The programmatic write above does not fire any DCA save_callback, so an
-     * active email-as-username extension would not update the username itself.
+     * The programmatic write above does not fire any DCA save_callback, so neither the
+     * bundle's own opt-in sync (A2/A3) nor an active email-as-username extension would
+     * update the username on its own – both are re-applied here explicitly.
      *
      * @return bool whether the username was changed
      */
     private function syncUsername(MemberModel $member, string $newEmail): bool
     {
-        // terminal42/contao-mailusername: pure sync, NO login decorator → the
-        // username MUST follow (verbatim), otherwise login with the new address breaks.
-        if (class_exists(\Terminal42\MailusernameBundle\Terminal42MailusernameBundle::class)) {
-            $member->username = $newEmail;
+        if ($this->emailAsUsernamePolicy->isEnabled()) {
+            $oldEmail = (string) $member->email;
+
+            if (!UsernameFollowRule::shouldFollow($member->username, $oldEmail)) {
+                return false; // A "fantasy" username stays untouched.
+            }
+
+            if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($newEmail, (int) $member->id)) {
+                return false; // Not eligible as a username – do not fail the whole confirmation over it.
+            }
+
+            $member->username = CanonicalUsername::normalize($newEmail);
 
             return true;
         }
 
-        // heimrichhannot/contao-email2username-bundle: login keeps working via its
-        // user-provider decorator, so this is cosmetic. It leaves username at
-        // varchar(64), so guard the length.
-        if (class_exists(\HeimrichHannot\Email2UsernameBundle\HeimrichHannotEmail2UsernameBundle::class)) {
-            $lower = mb_strtolower($newEmail);
+        // terminal42/contao-mailusername: pure sync, NO login decorator → the
+        // username MUST follow (verbatim), otherwise login with the new address breaks.
+        // (heimrichhannot/contao-email2username-bundle is not supported: its 1.4.0
+        // relies on the "importUser" hook, which Contao 5 removed.)
+        if (class_exists(\Terminal42\MailusernameBundle\Terminal42MailusernameBundle::class)) {
+            $member->username = $newEmail;
 
-            if (mb_strlen($lower) <= 64) {
-                $member->username = $lower;
-
-                return true;
-            }
+            return true;
         }
 
         return false;
@@ -165,7 +192,7 @@ class ConfirmEmailChangeController
     /**
      * logout() builds its own response carrying the cookie-clearing headers
      * (remember-me deletion, cleared session cookie). We render our own page
-     * instead, so move those cookies onto it — otherwise they are lost.
+     * instead, so move those cookies onto it – otherwise they are lost.
      */
     private function carryOverLogoutCookies(?Response $logoutResponse, Response $response): void
     {

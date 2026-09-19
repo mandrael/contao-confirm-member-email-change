@@ -27,3 +27,6 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Back to the ho
 
 // Replaces Contao's generic uniqueness error in the FE profile
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'This email address already exists.';
+
+// A2 (email as username opt-in): rejection when the address cannot be used as a login name
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['usernameRejected'] = 'This address cannot be used as a login name.';
