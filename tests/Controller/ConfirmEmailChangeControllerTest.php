@@ -97,7 +97,13 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         $optIn->method('find')->with('email-abc123')->willReturn($token);
 
         $tokenPurger = $this->createMock(UnconfirmedTokenPurger::class);
-        $tokenPurger->expects(self::once())->method('purge')->with(7, 'pw');
+        $purged = [];
+        $tokenPurger->expects(self::exactly(2))->method('purge')->willReturnCallback(
+            static function (int $memberId, string $prefix) use (&$purged): void {
+                self::assertSame(7, $memberId);
+                $purged[] = $prefix;
+            },
+        );
 
         $requestStack = new RequestStack();
         $requestStack->push(new Request());
@@ -120,6 +126,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
 
         self::assertSame(200, $response->getStatusCode());
         self::assertSame('new@example.com', $member->email);
+        self::assertSame(['pw', 'mdacc'], $purged);
     }
 
     private function createConfiguredAdapterStubTranslator(): TranslatorInterface
