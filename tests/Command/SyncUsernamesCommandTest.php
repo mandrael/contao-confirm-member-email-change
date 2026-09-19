@@ -56,7 +56,7 @@ class SyncUsernamesCommandTest extends ContaoTestCase
         $tester = $this->tester([$eligible], connection: $connection);
         $tester->execute(['--force' => true]);
 
-        self::assertStringContainsString('id = ? AND email = ?', $statements[0][0], 'the write must be conditional on the address just read');
+        self::assertStringContainsString('id = ? AND BINARY email = ?', $statements[0][0], 'the write must be conditional on the address just read, byte-exact (Review Runde 3)');
         self::assertSame(['new@example.com', $statements[0][1][1], 1, 'New@Example.com'], $statements[0][1]);
         self::assertStringContainsString('umgestellt: 1', $tester->getDisplay());
     }

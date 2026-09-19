@@ -22,9 +22,10 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * before the core's own uniqueness check).
  *
  * Every write in onSubmitMember() goes through a single conditional UPDATE
- * (`id = ? AND email = ?`, Runde 2 Befund 3, blockierend) - a Model::save() call would
- * write unconditionally and could overwrite a login name a racing confirm/revoke had
- * just set from a different address.
+ * (`id = ? AND BINARY email = ?`, Runde 2 Befund 3, blockierend; BINARY added Review
+ * Runde 3, siehe Blocker 3) - a Model::save() call would write unconditionally and
+ * could overwrite a login name a racing confirm/revoke had just set from a different
+ * address.
  */
 class UsernameSyncListenerTest extends ContaoTestCase
 {
@@ -162,7 +163,7 @@ class UsernameSyncListenerTest extends ContaoTestCase
 
         self::assertCount(1, $statements);
         self::assertStringContainsString('username = ?', $statements[0][0]);
-        self::assertStringContainsString('id = ? AND email = ?', $statements[0][0], 'the write must be conditional on the address just read');
+        self::assertStringContainsString('id = ? AND BINARY email = ?', $statements[0][0], 'the write must be conditional on the address just read, byte-exact (Review Runde 3)');
         self::assertSame(['new@example.com', $statements[0][1][1], 7, 'New@Example.com'], $statements[0][1]);
     }
 

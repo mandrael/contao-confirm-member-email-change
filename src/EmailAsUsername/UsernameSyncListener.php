@@ -143,8 +143,12 @@ final class UsernameSyncListener
             return;
         }
 
+        // Review Runde 3 (blockierend): utf8mb4_unicode_ci equates ß=ss, é=e and a
+        // trailing space - a byte-exact BINARY comparison is required so a collision in
+        // collation-equal but canonically DIFFERENT spellings cannot slip a stale login
+        // name past this guard in the race window between the read above and this write.
         $this->connection->executeStatement(
-            'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND email = ?',
+            'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND BINARY email = ?',
             [$canonical, time(), $memberId, $email],
         );
     }

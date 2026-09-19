@@ -111,6 +111,29 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Die Zuordnung Bestätigungslink → Mitglied wird beim Bestätigen jetzt zusätzlich aus der frisch
   gesperrten `tl_opt_in`-Zeile geprüft, statt nur aus dem vor der Sperre gelesenen Wert.
 
+### Behoben (Review Runde 3, 19.09.2026)
+- **Jede Bestätigung schlug fehl.** Die Nachbesserung aus Runde 2 fragte eine Spalte
+  `tl_opt_in.relatedRecords` ab, die es nicht gibt – die Beziehung liegt in der Kindtabelle
+  `tl_opt_in_related` (`pid`/`relTable`/`relId`). MariaDB brach die Abfrage mit einem Fehler ab, der
+  gefangen und als „ungültiger Link" angezeigt wurde; kein einziger gültiger Bestätigungslink kam
+  mehr durch. Die Prüfung liest jetzt `id` aus der gesperrten `tl_opt_in`-Zeile und fragt
+  `tl_opt_in_related` in derselben Transaktion ab, genau wie Contaos eigenes
+  `OptInModel::getRelatedRecords()`. Ein dauerhafter Test führt jede rohe SQL-Anweisung des Pakets
+  gegen eine aus den echten Spaltenlisten gebaute SQLite-Tabelle aus.
+- **Der Klartext-Widerrufstoken konnte in Versionierung, Detailansicht und Papierkorb landen.** Die
+  fünf Anker-Felder tragen jetzt zusätzlich `eval.versionize = false` und `eval.doNotShow = true`
+  (verhindert Aufnahme in `tl_version` bzw. Anzeige in `DC_Table::show()`). Für den Papierkorb (der
+  eigene Weg über `tl_undo`, den keine der beiden Optionen abdeckt) entfernt ein neuer
+  `config.ondelete_callback` die fünf Felder aus dem soeben geschriebenen `tl_undo`-Datensatz – ein
+  wiederhergestelltes Mitglied kommt ohne Anker zurück, genau wie eine Kopie.
+- **Das bedingte Benutzernamen-Update verglich die E-Mail-Adresse nicht bytegenau.** Sowohl der
+  Hintergrund-Abgleich (`UsernameSyncListener`) als auch `member-email:sync-usernames --force`
+  vergleichen jetzt über `BINARY email = ?` statt der Standard-Kollation, die z. B. „ß" und „ss"
+  oder einen abschließenden Leerraum gleichsetzt.
+- Log-Text bei fehlgeschlagenem Widerrufslink-Versand korrigiert: „derselbe Link wird erneut
+  gesendet" statt des überholten „ein neuer Link wird ausgestellt" (der Cron rotiert den Anker seit
+  Runde 2 nicht mehr).
+
 ## [1.0.0] - 2026-09-18
 
 ### Hinzugefügt

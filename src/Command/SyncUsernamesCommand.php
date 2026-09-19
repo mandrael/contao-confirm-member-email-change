@@ -116,9 +116,11 @@ final class SyncUsernamesCommand extends Command
             // which would write unconditionally and could overwrite a login name a
             // racing confirm/revoke had just set from a different address. Zero affected
             // rows means exactly that happened in the meantime; the next run catches it.
+            // Review Runde 3 (blockierend): same BINARY fix as UsernameSyncListener - see
+            // there for why utf8mb4_unicode_ci is not byte-exact.
             $email = (string) $member->email;
             $affected = $this->connection->executeStatement(
-                'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND email = ?',
+                'UPDATE tl_member SET username = ?, tstamp = ? WHERE id = ? AND BINARY email = ?',
                 [CanonicalUsername::normalize($email), time(), (int) $member->id, $email],
             );
 

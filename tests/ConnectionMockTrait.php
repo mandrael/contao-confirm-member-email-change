@@ -28,10 +28,11 @@ trait ConnectionMockTrait
     private array $statements = [];
 
     /**
-     * @param array<string, array<string, mixed>|false> $rows    fetchAssociative: SQL substring => row or false
-     * @param array<string, mixed>                      $scalars fetchOne: SQL substring => value
+     * @param array<string, array<string, mixed>|false>   $rows    fetchAssociative: SQL substring => row or false
+     * @param array<string, mixed>                        $scalars fetchOne: SQL substring => value
+     * @param array<string, list<array<string, mixed>>>   $lists   fetchAllAssociative: SQL substring => list of rows
      */
-    private function createConnectionMock(array $rows = [], array $scalars = []): Connection&MockObject
+    private function createConnectionMock(array $rows = [], array $scalars = [], array $lists = []): Connection&MockObject
     {
         $this->log = [];
         $this->statements = [];
@@ -61,6 +62,14 @@ trait ConnectionMockTrait
                 $this->log[] = 'read:'.$sql;
 
                 return $pick($sql, $scalars, false);
+            },
+        );
+
+        $connection->method('fetchAllAssociative')->willReturnCallback(
+            function (string $sql) use ($pick, $lists): array {
+                $this->log[] = 'read:'.$sql;
+
+                return $pick($sql, $lists, []);
             },
         );
 

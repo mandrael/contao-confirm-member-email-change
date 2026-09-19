@@ -63,7 +63,7 @@ class AnchorNotice
 
         if (!$sent) {
             // No exception message in the log: it can carry the recipient address.
-            $this->logger?->error(\sprintf('Could not send the email-change revoke notice for member ID %d. The anchor stays unnotified, a new link will be issued.', $memberId));
+            $this->logger?->error(\sprintf('Could not send the email-change revoke notice for member ID %d. The anchor stays unnotified, the same link will be sent again.', $memberId));
 
             return false;
         }

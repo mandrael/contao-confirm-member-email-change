@@ -12,7 +12,6 @@ use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\CoreBundle\OptIn\OptInTokenNoLongerValidException;
 use Contao\Email;
 use Contao\FrontendUser;
-use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice;
@@ -154,7 +153,7 @@ class ConfirmEmailChangeController
         // The token object was loaded BEFORE the lock. Re-read its row, locking, so two
         // parallel confirmations of the same link cannot both get past this point.
         $tokenRow = $this->connection->fetchAssociative(
-            'SELECT confirmedOn, invalidatedThrough, createdOn, email, relatedRecords FROM tl_opt_in WHERE token = ? FOR UPDATE',
+            'SELECT id, confirmedOn, invalidatedThrough, createdOn, email FROM tl_opt_in WHERE token = ? FOR UPDATE',
             [$optInToken->getIdentifier()],
         );
 
@@ -171,13 +170,29 @@ class ConfirmEmailChangeController
             return $fail('expired', true);
         }
 
-        // Runde 2, Hinweis (Codex): $memberId above came from $optInToken->getRelatedRecords(),
-        // read BEFORE the lock. Re-derive it from the SAME locked row the checks above just
-        // read, so the relation this confirmation acts on is verified fresh, not trusted from
-        // before the lock was even acquired.
-        $relatedRecords = $this->framework->getAdapter(StringUtil::class)->deserialize($tokenRow['relatedRecords'] ?? null, true);
+        // Review Runde 3 (blockierend): tl_opt_in has no "relatedRecords" column - the
+        // relation lives in the CHILD table tl_opt_in_related (pid/relTable/relId), the
+        // same way core OptInModel::getRelatedRecords() reads it (core 5.3/5.7
+        // OptInModel.php). Runde 2, Hinweis (Codex): $memberId above came from
+        // $optInToken->getRelatedRecords(), read BEFORE the lock - re-verified here from
+        // the SAME locked tl_opt_in row the checks above just read, so the relation this
+        // confirmation acts on is fresh, not trusted from before the lock was acquired.
+        $relatedRows = $this->connection->fetchAllAssociative(
+            'SELECT relTable, relId FROM tl_opt_in_related WHERE pid = ?',
+            [$tokenRow['id']],
+        );
 
-        if ($memberId !== (int) ($relatedRecords['tl_member'][0] ?? 0)) {
+        $memberLinked = false;
+
+        foreach ($relatedRows as $relatedRow) {
+            if ('tl_member' === $relatedRow['relTable'] && $memberId === (int) $relatedRow['relId']) {
+                $memberLinked = true;
+
+                break;
+            }
+        }
+
+        if (!$memberLinked) {
             return $fail('invalid', true);
         }
 

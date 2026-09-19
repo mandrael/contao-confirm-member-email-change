@@ -7,7 +7,6 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\Controller;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\Email;
-use Contao\StringUtil;
 use Contao\TestCase\ContaoTestCase;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\ConfirmEmailChangeController;
@@ -37,7 +36,9 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
 
     private const MEMBER_SQL = 'FROM tl_member WHERE id = ? FOR UPDATE';
 
-    private const TOKEN_SQL = 'FROM tl_opt_in';
+    private const TOKEN_SQL = 'FROM tl_opt_in WHERE token';
+
+    private const RELATED_SQL = 'FROM tl_opt_in_related';
 
     /**
      * Codex 2: the member row lock has to come FIRST. Everything the decision rests on
@@ -54,7 +55,10 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         self::assertStringContainsString(self::MEMBER_SQL, $this->log[1]);
 
         foreach ($this->log as $entry) {
-            if (str_starts_with($entry, 'read:SELECT') && !str_contains($entry, 'COUNT(*)')) {
+            // tl_opt_in_related rows are written once when the token is created and are
+            // never updated - only reachable via the ALREADY-locked tl_opt_in.id, so they
+            // need no lock of their own (Review Runde 3).
+            if (str_starts_with($entry, 'read:SELECT') && !str_contains($entry, 'COUNT(*)') && !str_contains($entry, self::RELATED_SQL)) {
                 self::assertStringContainsString('FOR UPDATE', $entry, 'every re-read after the lock must be a locking read');
             }
         }
@@ -85,17 +89,22 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
     /**
      * Runde 2, Hinweis (Codex): the member/token relation is re-verified from the freshly
      * locked tl_opt_in row, not trusted from the pre-lock read that determined which
-     * member row to lock in the first place.
+     * member row to lock in the first place. Review Runde 3: the relation now comes from
+     * tl_opt_in_related (pid/relTable/relId), not a non-existent tl_opt_in.relatedRecords
+     * column - this row points at member 99 while the locked member is 7 (the default).
      */
     public function testARelatedRecordsMismatchUnderTheLockIsRejected(): void
     {
-        $connection = $this->connection(tokenRow: [
-            'confirmedOn' => 0,
-            'invalidatedThrough' => '',
-            'createdOn' => time(),
-            'email' => 'new@example.com',
-            'relatedRecords' => 'a:1:{s:9:"tl_member";a:1:{i:0;i:99;}}',
-        ]);
+        $connection = $this->connection(
+            tokenRow: [
+                'id' => 1,
+                'confirmedOn' => 0,
+                'invalidatedThrough' => '',
+                'createdOn' => time(),
+                'email' => 'new@example.com',
+            ],
+            relatedRows: [['relTable' => 'tl_member', 'relId' => 99]],
+        );
 
         $optInToken = $this->optInToken();
         $optInToken->expects(self::never())->method('confirm');
@@ -291,10 +300,11 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
     }
 
     /**
-     * @param array<string, mixed>|null $memberRow
-     * @param array<string, mixed>|null $tokenRow
+     * @param array<string, mixed>|null              $memberRow
+     * @param array<string, mixed>|null              $tokenRow
+     * @param list<array<string, mixed>>|null         $relatedRows rows of tl_opt_in_related (relTable/relId)
      */
-    private function connection(array|null $memberRow = null, array|null $tokenRow = null): Connection
+    private function connection(array|null $memberRow = null, array|null $tokenRow = null, array|null $relatedRows = null): Connection
     {
         return $this->createConnectionMock(
             [
@@ -306,14 +316,15 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
                     'emailChangeAnchorExpires' => 0,
                 ],
                 self::TOKEN_SQL => $tokenRow ?? [
+                    'id' => 1,
                     'confirmedOn' => 0,
                     'invalidatedThrough' => '',
                     'createdOn' => time(),
                     'email' => 'new@example.com',
-                    'relatedRecords' => 'a:1:{s:9:"tl_member";a:1:{i:0;i:7;}}',
                 ],
             ],
             ['COUNT(*)' => 0],
+            [self::RELATED_SQL => $relatedRows ?? [['relTable' => 'tl_member', 'relId' => 7]]],
         );
     }
 
@@ -351,12 +362,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
     ): Response {
         $email ??= $this->createPartialMock(Email::class, ['sendTo']);
 
-        $stringUtilAdapter = $this->createAdapterMock(['deserialize']);
-        $stringUtilAdapter->method('deserialize')->willReturnCallback(
-            static fn (mixed $value): array => \is_string($value) ? unserialize($value, ['allowed_classes' => false]) : [],
-        );
-
-        $framework = $this->createContaoFrameworkMock([StringUtil::class => $stringUtilAdapter], [Email::class => $email]);
+        $framework = $this->createContaoFrameworkMock([], [Email::class => $email]);
 
         $optIn = $this->createMock(OptIn::class);
         $optIn->expects(self::once())->method('find')->with('email-abc123')->willReturn($optInToken ?? $this->optInToken());

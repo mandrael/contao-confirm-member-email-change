@@ -13,23 +13,32 @@ declare(strict_types=1);
 // unless it carries eval.doNotCopy - without it, copying a member would copy a still
 // valid revoke anchor too, and both rows would answer to the same link. All five anchor
 // fields below reset to their SQL default on copy.
-$doNotCopy = ['eval' => ['doNotCopy' => true]];
+//
+// Review Runde 3 (blockierend, DSH+Codex): the same five fields carry a plaintext token
+// (emailChangeAnchorPending) while a send is pending, so they must neither be versioned
+// nor shown. versionize=false keeps Versions::create() from serializing them into
+// tl_version (core 5.3/5.7 Versions.php, ~line 180 in both versions); doNotShow keeps them
+// out of DC_Table::show()'s detail view (core DC_Table.php, ~line 520 in both versions) -
+// they have no inputType anyway, so edit()/copyAll() never rendered them regardless.
+// tl_undo (DC_Table::delete()) is a separate snapshot outside Versions/show() and is
+// handled by AnchorUndoSanitizer's config.ondelete_callback instead.
+$anchorEval = ['eval' => ['doNotCopy' => true, 'versionize' => false, 'doNotShow' => true]];
 
 // sha256 hash of the revoke token; the plaintext exists only in the notification mail
 // and, for as long as its send is pending, in emailChangeAnchorPending below - never in
 // a log. BINARY so the lookup is a byte-exact match.
-$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorHash'] = $doNotCopy + [
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorHash'] = $anchorEval + [
     'sql' => "char(64) BINARY NOT NULL default ''",
 ];
 
 // The address the anchor restores to, i.e. the address BEFORE the confirmed change
 // that created it.
-$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorEmail'] = $doNotCopy + [
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorEmail'] = $anchorEval + [
     'sql' => "varchar(255) NOT NULL default ''",
 ];
 
 // Unix timestamp until the anchor is valid (EmailChangeAnchorPolicy::TTL_SECONDS).
-$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = $doNotCopy + [
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = $anchorEval + [
     'sql' => 'int unsigned NOT NULL default 0',
 ];
 
@@ -37,7 +46,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = $doNotCo
 // ResendEmailChangeAnchorNoticeCron re-sends the SAME link stored in
 // emailChangeAnchorPending rather than issuing a new one (Runde 2, Befund 2): rotating
 // the anchor on every retry could invalidate a link that already reached the mailbox.
-$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = $doNotCopy + [
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = $anchorEval + [
     'sql' => 'int unsigned NOT NULL default 0',
 ];
 
@@ -47,6 +56,6 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = $doNotC
 // window only - cleared the moment the mail goes out (AnchorNotice), on revoke, on
 // expiry (PurgeExpiredEmailChangeAnchorsCron) and overwritten whenever a fresh anchor
 // replaces this one.
-$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorPending'] = $doNotCopy + [
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorPending'] = $anchorEval + [
     'sql' => "varchar(64) NOT NULL default ''",
 ];
