@@ -7,37 +7,86 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\Controller;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\Email;
-use Contao\MemberModel;
 use Contao\TestCase\ContaoTestCase;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\ConfirmEmailChangeController;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\ConnectionMockTrait;
+use Psr\Log\LoggerInterface;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * The username-follow decision itself (A2/A3) is covered by UsernameChangeSyncTest -
- * this class covers what is specific to the controller: revoking the stale core
- * password-reset token on a successful confirm (A6) and the A8 security-anchor
- * lifecycle (create / chain / notice with-or-without a link).
+ * this class covers what is specific to the controller: the locking protocol, the A6
+ * token revocation, the A8 anchor lifecycle and the error boundary around the commit.
  */
 class ConfirmEmailChangeControllerTest extends ContaoTestCase
 {
+    use ConnectionMockTrait;
+
+    private const MEMBER_SQL = 'FROM tl_member WHERE id = ? FOR UPDATE';
+
+    private const TOKEN_SQL = 'FROM tl_opt_in';
+
+    /**
+     * Codex 2: the member row lock has to come FIRST. Everything the decision rests on
+     * is read after it and only with locking reads, so nothing can slip in between the
+     * check and the write.
+     */
+    public function testLocksTheMemberRowBeforeReadingAnythingElse(): void
+    {
+        $connection = $this->connection();
+        $this->invokeController($connection);
+
+        self::assertSame('begin', $this->log[0]);
+        self::assertStringContainsString('read:SELECT id, email', $this->log[1]);
+        self::assertStringContainsString(self::MEMBER_SQL, $this->log[1]);
+
+        foreach ($this->log as $entry) {
+            if (str_starts_with($entry, 'read:SELECT') && !str_contains($entry, 'COUNT(*)')) {
+                self::assertStringContainsString('FOR UPDATE', $entry, 'every re-read after the lock must be a locking read');
+            }
+        }
+
+        self::assertContains('commit', $this->log);
+    }
+
+    /**
+     * Codex 2, the actual race: the token object was loaded BEFORE the lock, so its
+     * "not confirmed yet" may be stale. The fresh row under the lock decides.
+     */
+    public function testAParallelConfirmationThatWonTheLockIsNotAppliedTwice(): void
+    {
+        $connection = $this->connection(tokenRow: ['confirmedOn' => time(), 'invalidatedThrough' => '', 'createdOn' => time(), 'email' => 'new@example.com']);
+
+        $optInToken = $this->optInToken();
+        $optInToken->expects(self::never())->method('confirm');
+
+        $response = $this->invokeController($connection, optInToken: $optInToken);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.alreadyConfirmed', (string) $response->getContent());
+        self::assertSame([], $this->statements, 'nothing may be written when the link was consumed in parallel');
+        self::assertContains('rollBack', $this->log);
+        self::assertNotContains('commit', $this->log);
+    }
+
     /**
      * A6: a still-open core password-reset link for the OLD address must die with a
      * successful confirmation, so it cannot be used to take over the recovery channel.
      */
     public function testRevokesTheStaleCorePasswordResetTokenOnSuccess(): void
     {
-        $member = $this->member(['id' => 7, 'email' => 'old@example.com', 'username' => 'johndoe']);
-
         $tokenPurger = $this->createMock(UnconfirmedTokenPurger::class);
         $purged = [];
         $tokenPurger->expects(self::exactly(2))->method('purge')->willReturnCallback(
@@ -47,115 +96,236 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
             },
         );
 
-        $response = $this->invokeController($member, $tokenPurger);
+        $response = $this->invokeController($this->connection(), tokenPurger: $tokenPurger);
 
         self::assertSame(200, $response->getStatusCode());
-        self::assertSame('new@example.com', $member->email);
         self::assertSame(['pw', 'mdacc'], $purged);
+
+        $update = $this->statementsContaining('UPDATE tl_member SET email')[0] ?? null;
+        self::assertNotNull($update);
+        self::assertSame('new@example.com', $update['params'][0]);
     }
 
     /**
-     * A8: no anchor exists yet -> a fresh one is created (hash of a random token,
-     * OLD address, a 14-day expiry) and the old address gets the notice WITH the
-     * revoke link.
+     * A8: no anchor exists yet -> a fresh one is created (hash of a random token, OLD
+     * address, a 14-day expiry) and the old address gets the notice WITH the link. The
+     * "notified" column stays 0 until the mail really went out (Codex 6).
      */
     public function testCreatesAFreshAnchorAndSendsTheLinkedNoticeWhenNoneExists(): void
     {
-        $member = $this->member([
-            'id' => 7, 'email' => 'old@example.com', 'username' => 'johndoe',
-            'emailChangeAnchorHash' => '', 'emailChangeAnchorEmail' => '', 'emailChangeAnchorExpires' => 0,
-        ]);
+        $sent = [];
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->expects(self::once())->method('send')->willReturnCallback(
+            static function (int $memberId, string $to, string $plainToken) use (&$sent): bool {
+                $sent = [$memberId, $to, $plainToken];
+
+                return true;
+            },
+        );
 
         $before = time();
-        $this->invokeController($member);
+        $this->invokeController($this->connection(), anchorNotice: $anchorNotice);
         $after = time();
 
-        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) $member->emailChangeAnchorHash);
-        self::assertSame('old@example.com', $member->emailChangeAnchorEmail);
-        self::assertGreaterThanOrEqual($before + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $member->emailChangeAnchorExpires);
-        self::assertLessThanOrEqual($after + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $member->emailChangeAnchorExpires);
+        $anchor = $this->statementsContaining('emailChangeAnchorHash = ?')[0] ?? null;
+        self::assertNotNull($anchor);
+        self::assertStringContainsString('emailChangeAnchorNotified = 0', $anchor['sql']);
+        self::assertSame(hash('sha256', $sent[2]), $anchor['params'][0], 'only the hash is stored, the plaintext goes into the mail');
+        self::assertSame('old@example.com', $anchor['params'][1]);
+        self::assertGreaterThanOrEqual($before + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $anchor['params'][2]);
+        self::assertLessThanOrEqual($after + EmailChangeAnchorPolicy::TTL_SECONDS, (int) $anchor['params'][2]);
+        self::assertSame([7, 'old@example.com'], [$sent[0], $sent[1]]);
     }
 
     /**
-     * A8 chain rule: a still-valid anchor from an earlier change must NOT be
-     * overwritten by a second confirmed change - otherwise an attacker who just took
-     * over the account could erase the real owner's own way back in. The old address
-     * of THIS second change gets the notice WITHOUT a link instead.
+     * A8 chain rule: a still-valid anchor from an earlier change must NOT be overwritten
+     * by a second confirmed change - otherwise an attacker who just took over the account
+     * could erase the real owner's own way back in. The old address of THIS change gets
+     * the notice WITHOUT a link instead.
      */
     public function testKeepsAnExistingValidAnchorUnchanged(): void
     {
-        $member = $this->member([
-            'id' => 7, 'email' => 'compromised@example.com', 'username' => 'johndoe',
+        $connection = $this->connection(memberRow: [
+            'id' => 7,
+            'email' => 'compromised@example.com',
+            'username' => 'johndoe',
             'emailChangeAnchorHash' => str_repeat('a', 64),
-            'emailChangeAnchorEmail' => 'victim@example.com',
             'emailChangeAnchorExpires' => time() + 3600,
         ]);
 
         $email = $this->createPartialMock(Email::class, ['sendTo']);
         $email->expects(self::once())->method('sendTo')->with('compromised@example.com');
 
-        $this->invokeController($member, null, $email);
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->expects(self::never())->method('send');
 
-        self::assertSame(str_repeat('a', 64), $member->emailChangeAnchorHash);
-        self::assertSame('victim@example.com', $member->emailChangeAnchorEmail);
+        $this->invokeController($connection, email: $email, anchorNotice: $anchorNotice);
+
+        self::assertSame([], $this->statementsContaining('emailChangeAnchorHash = ?'));
         self::assertSame('MSC.confirmEmailChange.revokeNoticeChainedText', $email->text);
     }
 
     /**
-     * A8: an EXPIRED anchor is not "still valid" - the chain rule does not apply and
-     * a fresh anchor replaces it (with the linked notice again).
+     * A8: an EXPIRED anchor is not "still valid" - the chain rule does not apply and a
+     * fresh anchor replaces it.
      */
     public function testReplacesAnExpiredAnchor(): void
     {
-        $member = $this->member([
-            'id' => 7, 'email' => 'old@example.com', 'username' => 'johndoe',
+        $connection = $this->connection(memberRow: [
+            'id' => 7,
+            'email' => 'old@example.com',
+            'username' => 'johndoe',
             'emailChangeAnchorHash' => str_repeat('a', 64),
-            'emailChangeAnchorEmail' => 'ancient@example.com',
             'emailChangeAnchorExpires' => time() - 1,
         ]);
 
-        $email = $this->createPartialMock(Email::class, ['sendTo']);
-        $email->expects(self::once())->method('sendTo')->with('old@example.com');
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->expects(self::once())->method('send')->willReturn(true);
 
-        $this->invokeController($member, null, $email);
+        $this->invokeController($connection, anchorNotice: $anchorNotice);
 
-        self::assertNotSame(str_repeat('a', 64), $member->emailChangeAnchorHash);
-        self::assertSame('old@example.com', $member->emailChangeAnchorEmail);
-        self::assertSame('MSC.confirmEmailChange.revokeNoticeText', $email->text);
+        $anchor = $this->statementsContaining('emailChangeAnchorHash = ?')[0] ?? null;
+        self::assertNotNull($anchor);
+        self::assertNotSame(str_repeat('a', 64), $anchor['params'][0]);
     }
 
     /**
-     * @param array<string, mixed> $properties
+     * Codex 4 / "zwingend": the address is not written when it can no longer become the
+     * login name. The link stays unconsumed so a resolvable collision can still be fixed.
      */
-    private function member(array $properties): MemberModel
+    public function testDoesNotConfirmWhenTheAddressCannotBecomeTheLoginName(): void
     {
-        return $this->createClassWithPropertiesMock(MemberModel::class, $properties);
+        $optInToken = $this->optInToken();
+        $optInToken->expects(self::never())->method('confirm');
+
+        $response = $this->invokeController(
+            $this->connection(),
+            optInToken: $optInToken,
+            usernameChangeSync: $this->usernameChangeSync(true, EligibilityReason::Collision),
+        );
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.usernameRejected', (string) $response->getContent());
+        self::assertSame([], $this->statements);
+        self::assertContains('rollBack', $this->log);
     }
 
-    private function invokeController(MemberModel $member, ?UnconfirmedTokenPurger $tokenPurger = null, ?Email $email = null): Response
+    /**
+     * Codex 7: a technical failure rolls back and shows a page, it never escapes as an
+     * exception - and it never leaves the transaction open.
+     */
+    public function testATechnicalFailureRollsBackAndShowsAPage(): void
     {
-        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member, 'findOneBy' => null]);
-        $email ??= $this->createPartialMock(Email::class, ['sendTo']);
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter], [Email::class => $email]);
+        $connection = $this->createMock(Connection::class);
+        $connection->method('beginTransaction')->willReturnCallback(function (): void { $this->log[] = 'begin'; });
+        $connection->method('isTransactionActive')->willReturn(true);
+        $connection->method('fetchAssociative')->willThrowException(new \RuntimeException('database gone'));
+        $connection->expects(self::once())->method('rollBack');
 
-        $token = $this->createStub(OptInTokenInterface::class);
-        $token->method('getIdentifier')->willReturn('email-abc123');
-        $token->method('isConfirmed')->willReturn(false);
-        $token->method('isValid')->willReturn(true);
-        $token->method('getRelatedRecords')->willReturn(['tl_member' => [7]]);
-        $token->method('getEmail')->willReturn('new@example.com');
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+
+        $response = $this->invokeController($connection, logger: $logger);
+
+        self::assertSame(400, $response->getStatusCode());
+    }
+
+    /**
+     * Codex 6/7: the change is committed before the notice is sent, so a failing mail
+     * must never present the applied change as a failure.
+     */
+    public function testAFailingNoticeDoesNotTurnTheCommittedChangeIntoAFailure(): void
+    {
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->method('send')->willThrowException(new \RuntimeException('smtp down'));
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+
+        $response = $this->invokeController($this->connection(), anchorNotice: $anchorNotice, logger: $logger);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.success', (string) $response->getContent());
+        self::assertContains('commit', $this->log);
+    }
+
+    /**
+     * DeepSeek H2: the URL carries the token, so the page must not be cached or indexed.
+     */
+    public function testTheConfirmationPageIsNeitherCachedNorIndexed(): void
+    {
+        $response = $this->invokeController($this->connection());
+
+        self::assertSame('no-store, private', $response->headers->get('Cache-Control'));
+        self::assertSame('noindex', $response->headers->get('X-Robots-Tag'));
+    }
+
+    /**
+     * @param array<string, mixed>|null $memberRow
+     * @param array<string, mixed>|null $tokenRow
+     */
+    private function connection(array|null $memberRow = null, array|null $tokenRow = null): Connection
+    {
+        return $this->createConnectionMock(
+            [
+                self::MEMBER_SQL => $memberRow ?? [
+                    'id' => 7,
+                    'email' => 'old@example.com',
+                    'username' => 'johndoe',
+                    'emailChangeAnchorHash' => '',
+                    'emailChangeAnchorExpires' => 0,
+                ],
+                self::TOKEN_SQL => $tokenRow ?? [
+                    'confirmedOn' => 0,
+                    'invalidatedThrough' => '',
+                    'createdOn' => time(),
+                    'email' => 'new@example.com',
+                ],
+            ],
+            ['COUNT(*)' => 0],
+        );
+    }
+
+    private function optInToken(): OptInTokenInterface&\PHPUnit\Framework\MockObject\MockObject
+    {
+        $optInToken = $this->createMock(OptInTokenInterface::class);
+        $optInToken->method('getIdentifier')->willReturn('email-abc123');
+        $optInToken->method('isConfirmed')->willReturn(false);
+        $optInToken->method('isValid')->willReturn(true);
+        $optInToken->method('getRelatedRecords')->willReturn(['tl_member' => [7]]);
+        $optInToken->method('getEmail')->willReturn('new@example.com');
+
+        return $optInToken;
+    }
+
+    private function usernameChangeSync(bool $enabled = false, EligibilityReason $reason = EligibilityReason::Eligible): UsernameChangeSync
+    {
+        $policy = $this->createStub(EmailAsUsernamePolicy::class);
+        $policy->method('isEnabled')->willReturn($enabled);
+
+        $usernamePolicy = $this->createStub(UsernamePolicy::class);
+        $usernamePolicy->method('evaluate')->willReturn($reason);
+
+        return new UsernameChangeSync($policy, $usernamePolicy);
+    }
+
+    private function invokeController(
+        Connection $connection,
+        UnconfirmedTokenPurger|null $tokenPurger = null,
+        Email|null $email = null,
+        AnchorNotice|null $anchorNotice = null,
+        OptInTokenInterface|null $optInToken = null,
+        UsernameChangeSync|null $usernameChangeSync = null,
+        LoggerInterface|null $logger = null,
+    ): Response {
+        $email ??= $this->createPartialMock(Email::class, ['sendTo']);
+        $framework = $this->createContaoFrameworkMock([], [Email::class => $email]);
 
         $optIn = $this->createMock(OptIn::class);
-        $optIn->expects(self::once())->method('find')->with('email-abc123')->willReturn($token);
+        $optIn->expects(self::once())->method('find')->with('email-abc123')->willReturn($optInToken ?? $this->optInToken());
 
         $requestStack = new RequestStack();
         $requestStack->push(new Request());
-
-        // No email-as-username extension active in the test environment -> username
-        // stays untouched, which keeps these tests focused on the anchor/notice logic.
-        $emailAsUsernamePolicy = $this->createStub(EmailAsUsernamePolicy::class);
-        $emailAsUsernamePolicy->method('isEnabled')->willReturn(false);
-        $usernameChangeSync = new UsernameChangeSync($emailAsUsernamePolicy, $this->createStub(UsernamePolicy::class));
 
         $translator = $this->createStub(TranslatorInterface::class);
         $translator->method('trans')->willReturnArgument(0);
@@ -166,9 +336,11 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
             $translator,
             $requestStack,
             $this->createStub(Security::class),
-            $usernameChangeSync,
+            $usernameChangeSync ?? $this->usernameChangeSync(),
             $tokenPurger ?? $this->createStub(UnconfirmedTokenPurger::class),
-            $this->createStub(UrlGeneratorInterface::class),
+            $connection,
+            $anchorNotice ?? $this->createStub(AnchorNotice::class),
+            $logger,
         );
 
         return $controller('email-abc123');

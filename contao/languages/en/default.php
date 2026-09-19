@@ -48,6 +48,6 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormTitle'] = 'Revoke th
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormText'] = 'Do you want to undo the most recent change of your email address? Your previous address will be restored and your password invalidated.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeButton'] = 'Revoke the change';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccessTitle'] = 'Change revoked';
-$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'The change has been undone. Please set a new password.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'The change has been undone. Your previous password is no longer valid. Please set a new one via the "forgot password" function or the login help of this website.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeErrorTitle'] = 'Revocation not possible';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeInvalid'] = 'The link is invalid or has expired.';

@@ -14,12 +14,18 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityRea
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameSyncListener;
+use Psr\Log\LoggerInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
+/**
+ * The field callback only VALIDATES, the onsubmit callback WRITES - see the class
+ * docblock of UsernameSyncListener for why (Codex 1: a write in the field callback runs
+ * before the core's own uniqueness check).
+ */
 class UsernameSyncListenerTest extends ContaoTestCase
 {
     /**
-     * A1: proves the switch off leaves this new code path fully inert – part of
+     * A1: proves the switch off leaves this new code path fully inert - part of
      * "Schalter aus = 1.0-Verhalten unverändert".
      */
     public function testDoesNothingWhenTheSwitchIsOff(): void
@@ -31,124 +37,217 @@ class UsernameSyncListenerTest extends ContaoTestCase
         $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
 
         self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
+
+        $listener->onSubmitMember($dc);
     }
 
-    public function testRegistrationInvocationIsIgnored(): void
+    /**
+     * Codex 1: the field callback must not write. DC_Table runs it BEFORE checking that
+     * the email is unique, so a login name written here would survive a rejected email.
+     */
+    public function testTheFieldCallbackNeverWrites(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::never())->method('evaluate');
+        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
 
-        $listener = $this->listener(true, $usernamePolicy);
+        $memberAdapter = $this->createAdapterMock(['findByPk']);
+        $memberAdapter->expects(self::never())->method('findByPk');
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
 
-        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', null));
+        $listener = $this->listener(true, $usernamePolicy, $framework);
+
+        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $this->dataContainer(7, 'johndoe', 'old@example.com')));
     }
 
-    public function testFrontEndPendingChangeHasNoEffectiveNewValue(): void
+    /**
+     * Codex 4 (a): registration is invoked as ($value, null). An ineligible address is
+     * thrown back, which makes ModuleRegistration add a widget error and skip the
+     * insert - the member is never created without a login name.
+     */
+    public function testRegistrationWithAnIneligibleAddressIsRejected(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::never())->method('evaluate');
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('a#b@example.com', null)->willReturn(EligibilityReason::Invalid);
 
-        $listener = $this->listener(true, $usernamePolicy);
+        $this->expectException(\Exception::class);
+        $this->listener(true, $usernamePolicy)->onSaveEmail('a#b@example.com', null);
+    }
+
+    public function testRegistrationWithAnEligibleAddressPassesThrough(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
+
+        self::assertSame('new@example.com', $this->listener(true, $usernamePolicy)->onSaveEmail('new@example.com', null));
+    }
+
+    /**
+     * Codex 4 (b): the front-end request for a change is validated too. This listener
+     * runs at priority 256, i.e. BEFORE EmailChangeListener swaps the value back to the
+     * old address, so it sees the address the member really typed.
+     */
+    public function testFrontEndRequestWithAnIneligibleAddressIsRejected(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('a#b@example.com', 7)->willReturn(EligibilityReason::Invalid);
+
         $user = $this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 7, 'username' => '', 'email' => 'old@example.com']);
         $module = $this->createStub(ModulePersonalData::class);
 
-        // EmailChangeListener (priority 255) already suppressed the write and returned the
-        // OLD address here, so this sees "no effective change".
-        self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $user, $module));
+        $this->expectException(\Exception::class);
+        $this->listener(true, $usernamePolicy)->onSaveEmail('a#b@example.com', $user, $module);
     }
 
     /**
-     * A "fantasy" username no longer survives - the follow rule that protected it was
-     * deliberately removed (Auftraggeber, 19.09.2026: username IS email, hard requirement).
+     * Codex 4 (c): an UNCHANGED ineligible address must not block saving the member -
+     * otherwise a legacy member can no longer be edited at all once the switch is on.
      */
-    public function testOverwritesAFantasyUsernameWhenTheEmailChanges(): void
-    {
-        $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
-
-        $member = $this->createMock(MemberModel::class);
-        $member->expects(self::once())->method('setRow')->with(['username' => 'new@example.com'])->willReturn($member);
-        $member->expects(self::once())->method('save');
-
-        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
-
-        $listener = $this->listener(true, $usernamePolicy, $framework);
-        $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
-
-        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
-    }
-
-    /**
-     * BE only: even when the email itself is unchanged, a stale/mismatched username is
-     * corrected (e.g. the switch was only just turned on) - the early "no effective change"
-     * exit must not shield a mismatched username from being fixed.
-     */
-    public function testFixesAMismatchedUsernameOnTheBackEndEvenWhenTheEmailIsUnchanged(): void
-    {
-        $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->expects(self::once())->method('evaluate')->with('old@example.com', 7)->willReturn(EligibilityReason::Eligible);
-
-        $member = $this->createMock(MemberModel::class);
-        $member->expects(self::once())->method('setRow')->with(['username' => 'old@example.com'])->willReturn($member);
-        $member->expects(self::once())->method('save');
-
-        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
-        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
-
-        $listener = $this->listener(true, $usernamePolicy, $framework);
-        $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
-
-        self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $dc));
-    }
-
-    /**
-     * A1: the switch off leaves a mismatched username untouched too - not just an actual
-     * email change, part of "Schalter aus = 1.0-Verhalten unverändert".
-     */
-    public function testDoesNothingWhenTheSwitchIsOffEvenWithAMismatchedUsername(): void
+    public function testAnUnchangedIneligibleAddressDoesNotBlockTheSave(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->expects(self::never())->method('evaluate');
 
-        $listener = $this->listener(false, $usernamePolicy);
-        $dc = $this->dataContainer(7, 'johndoe', 'old@example.com');
+        $listener = $this->listener(true, $usernamePolicy);
 
-        self::assertSame('old@example.com', $listener->onSaveEmail('old@example.com', $dc));
+        self::assertSame('a#b@example.com', $listener->onSaveEmail('a#b@example.com', $this->dataContainer(7, 'johndoe', 'a#b@example.com')));
     }
 
-    public function testRejectsTheSaveWhenTheAddressIsNotEligible(): void
+    /**
+     * Codex 4 (c), same case on the writing side: no throw, no write, one log entry
+     * that names nothing but the member ID.
+     */
+    public function testAnUnchangedIneligibleAddressOnlyLeavesALogEntry(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Collision);
+        $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Invalid);
 
-        $listener = $this->listener(true, $usernamePolicy);
-        $dc = $this->dataContainer(7, '', 'old@example.com');
+        $memberAdapter = $this->createAdapterMock(['findByPk']);
+        $memberAdapter->expects(self::never())->method('findByPk');
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
 
-        $this->expectException(\Exception::class);
-        $listener->onSaveEmail('new@example.com', $dc);
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('warning')->with(self::logicalAnd(
+            self::stringContains('Member ID 7'),
+            self::logicalNot(self::stringContains('a#b@example.com')),
+        ));
+
+        $this->listener(true, $usernamePolicy, $framework, $logger)->onSubmitMember($this->dataContainer(7, 'johndoe', 'a#b@example.com'));
     }
 
-    public function testSyncsTheUsernameForAnEligibleBackEndChange(): void
+    /**
+     * Codex 1: after a back end save the login name really has to be on the model when
+     * save() runs - the old setRow() never marked anything as modified.
+     */
+    public function testWritesTheLoginNameAfterTheBackEndSave(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::once())->method('evaluate')->with('New@Example.com', 7)->willReturn(EligibilityReason::Eligible);
+
+        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 7, 'username' => 'johndoe']);
+        $member->expects(self::once())->method('save')->willReturnCallback(
+            static function () use ($member): void {
+                self::assertSame('new@example.com', $member->username, 'the login name has to be set BEFORE save()');
+            },
+        );
+
+        $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+
+        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'johndoe', 'New@Example.com'));
+
+        self::assertSame('new@example.com', $member->username);
+    }
+
+    /**
+     * Codex 4 (d): "already in sync" is an EXACT comparison against the canonical form.
+     * strcasecmp would call "Anna@Example.com" in sync although the rule demands the
+     * lower-cased address.
+     */
+    public function testAUsernameThatOnlyDiffersInCaseIsNotConsideredInSync(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
         $usernamePolicy->method('evaluate')->willReturn(EligibilityReason::Eligible);
 
-        $member = $this->createMock(MemberModel::class);
-        $member->expects(self::once())->method('setRow')->with(['username' => 'new@example.com'])->willReturn($member);
+        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 7, 'username' => 'Anna@Example.com']);
         $member->expects(self::once())->method('save');
 
         $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
         $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
 
-        $listener = $this->listener(true, $usernamePolicy, $framework);
-        $dc = $this->dataContainer(7, '', 'old@example.com');
+        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'Anna@Example.com', 'Anna@Example.com'));
 
-        self::assertSame('new@example.com', $listener->onSaveEmail('new@example.com', $dc));
+        self::assertSame('anna@example.com', $member->username);
     }
 
-    private function listener(bool $enabled, UsernamePolicy $usernamePolicy, ?ContaoFramework $framework = null): UsernameSyncListener
+    public function testAnAlreadyCanonicalLoginNameIsLeftAlone(): void
     {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::never())->method('evaluate');
+
+        $memberAdapter = $this->createAdapterMock(['findByPk']);
+        $memberAdapter->expects(self::never())->method('findByPk');
+        $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
+
+        $this->listener(true, $usernamePolicy, $framework)->onSubmitMember($this->dataContainer(7, 'old@example.com', 'old@example.com'));
+    }
+
+    /**
+     * The front end never writes: ModulePersonalData passes the user object, not a
+     * DataContainer, and a pending change is indistinguishable from an unchanged email.
+     */
+    public function testTheFrontEndSubmitNeverWrites(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::never())->method('evaluate');
+
+        $user = $this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 7, 'username' => 'johndoe', 'email' => 'old@example.com']);
+
+        $this->listener(true, $usernamePolicy)->onSubmitMember($user);
+    }
+
+    /**
+     * The validation only sees the address the member really typed if it runs BEFORE
+     * EmailChangeListener swaps a pending front-end change back. Contao sorts DCA
+     * callbacks by descending priority (core DataContainerCallbackListener.php:114,131),
+     * so this invariant is a number in an attribute - and numbers get changed.
+     */
+    public function testValidatesBeforeThePendingChangeInterception(): void
+    {
+        self::assertGreaterThan(
+            $this->callbackPriority(\Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener::class, 'onSaveEmail'),
+            $this->callbackPriority(UsernameSyncListener::class, 'onSaveEmail'),
+        );
+    }
+
+    /**
+     * A read that fails must never end up writing a default value.
+     */
+    public function testAFailedRecordReadWritesNothing(): void
+    {
+        $usernamePolicy = $this->createMock(UsernamePolicy::class);
+        $usernamePolicy->expects(self::never())->method('evaluate');
+
+        $dc = $this->createMock(DataContainer::class);
+        $dc->method('getCurrentRecord')->willReturn(null);
+
+        $this->listener(true, $usernamePolicy)->onSubmitMember($dc);
+    }
+
+    private function callbackPriority(string $class, string $method): int
+    {
+        $attribute = (new \ReflectionMethod($class, $method))->getAttributes(\Contao\CoreBundle\DependencyInjection\Attribute\AsCallback::class)[0] ?? null;
+
+        self::assertNotNull($attribute, $class.'::'.$method.' must be registered as a DCA callback');
+
+        return (int) $attribute->newInstance()->priority;
+    }
+
+    private function listener(
+        bool $enabled,
+        UsernamePolicy $usernamePolicy,
+        ContaoFramework|null $framework = null,
+        LoggerInterface|null $logger = null,
+    ): UsernameSyncListener {
         $policy = $this->createMock(EmailAsUsernamePolicy::class);
         $policy->method('isEnabled')->willReturn($enabled);
 
@@ -157,6 +256,7 @@ class UsernameSyncListenerTest extends ContaoTestCase
             $usernamePolicy,
             $this->createStub(TranslatorInterface::class),
             $framework ?? $this->createContaoFrameworkMock(),
+            $logger,
         );
     }
 

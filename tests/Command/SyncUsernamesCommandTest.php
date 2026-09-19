@@ -9,6 +9,7 @@ use Contao\StringUtil;
 use Contao\TestCase\ContaoTestCase;
 use Contao\Validator;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Command\SyncUsernamesCommand;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
 use Symfony\Component\Console\Tester\CommandTester;
 
@@ -61,10 +62,43 @@ class SyncUsernamesCommandTest extends ContaoTestCase
         self::assertStringContainsString('würde umgestellt: 1', $tester->getDisplay());
     }
 
+
+    /**
+     * DeepSeek BL-2: the command is the migration path FOR the opt-in. With the switch
+     * off, --force would silently rewrite every login name with no way back.
+     */
+    public function testForceIsRefusedWhileTheSwitchIsOff(): void
+    {
+        $member = $this->member(1, 'New@Example.com', '', 'a:0:{}');
+        $member->expects(self::never())->method('save');
+
+        $tester = $this->tester([$member], false);
+        $tester->execute(['--force' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('memberEmailAsUsername', $tester->getDisplay());
+    }
+
+    /**
+     * The dry run stays available either way, so an operator can see what turning the
+     * switch on would do before doing it.
+     */
+    public function testTheDryRunStillWorksWhileTheSwitchIsOff(): void
+    {
+        $member = $this->member(1, 'new@example.com', '', 'a:0:{}');
+        $member->expects(self::never())->method('save');
+
+        $tester = $this->tester([$member], false);
+        $tester->execute([]);
+
+        self::assertSame(0, $tester->getStatusCode());
+        self::assertStringContainsString('würde umgestellt: 1', $tester->getDisplay());
+    }
+
     /**
      * @param list<MemberModel&\PHPUnit\Framework\MockObject\MockObject> $members
      */
-    private function tester(array $members): CommandTester
+    private function tester(array $members, bool $switchOn = true): CommandTester
     {
         $memberAdapter = $this->createAdapterMock(['findAll', 'findOneBy']);
         $memberAdapter->method('findAll')->willReturn($members);
@@ -83,7 +117,10 @@ class SyncUsernamesCommandTest extends ContaoTestCase
             Validator::class => $validatorAdapter,
         ]);
 
-        $command = new SyncUsernamesCommand($framework, new UsernamePolicy($framework));
+        $policy = $this->createStub(EmailAsUsernamePolicy::class);
+        $policy->method('isEnabled')->willReturn($switchOn);
+
+        $command = new SyncUsernamesCommand($framework, new UsernamePolicy($framework), $policy);
 
         return new CommandTester($command);
     }

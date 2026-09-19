@@ -27,7 +27,7 @@ class PurgeExpiredEmailChangeAnchorsCron
     public function __invoke(): void
     {
         $affected = $this->connection->executeStatement(
-            "UPDATE tl_member SET emailChangeAnchorHash = '', emailChangeAnchorEmail = '', emailChangeAnchorExpires = 0 WHERE emailChangeAnchorHash != '' AND emailChangeAnchorExpires <= ?",
+            "UPDATE tl_member SET emailChangeAnchorHash = '', emailChangeAnchorEmail = '', emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0 WHERE emailChangeAnchorHash != '' AND emailChangeAnchorExpires <= ?",
             [time()],
         );
 

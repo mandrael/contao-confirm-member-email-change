@@ -42,6 +42,18 @@ final class UsernameChangeSync
     }
 
     /**
+     * True when the opt-in is on AND $newEmail cannot become the username. Callers
+     * that may still refuse their own write (the confirm controller) use this to stop
+     * BEFORE writing an address the username can no longer follow - "username IS the
+     * email" only holds if the write is refused when the rule cannot be met.
+     */
+    public function rejects(string $newEmail, ?int $excludeMemberId): bool
+    {
+        return $this->policy->isEnabled()
+            && EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($newEmail, $excludeMemberId);
+    }
+
+    /**
      * Pure decision: what tl_member.username SHOULD become once $currentEmail is
      * replaced by $newEmail, or null if it must stay untouched. Null covers two
      * cases: the opt-in (A1) is off and no email-as-username extension is active, or
@@ -54,7 +66,7 @@ final class UsernameChangeSync
     public function resolve(?string $currentUsername, string $currentEmail, string $newEmail, int $excludeMemberId): ?string
     {
         if ($this->policy->isEnabled()) {
-            if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($newEmail, $excludeMemberId)) {
+            if ($this->rejects($newEmail, $excludeMemberId)) {
                 return null; // Not eligible as a username - do not fail the whole caller over it.
             }
 

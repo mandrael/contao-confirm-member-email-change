@@ -25,3 +25,10 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorEmail'] = [
 $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = [
     'sql' => 'int unsigned NOT NULL default 0',
 ];
+
+// 1 once the revoke link really left the house. The plaintext token lives ONLY in that
+// mail, so a failed send would otherwise destroy the single way back; while this stays 0
+// ResendEmailChangeAnchorNoticeCron issues a fresh link for the same deadline.
+$GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = [
+    'sql' => 'int unsigned NOT NULL default 0',
+];

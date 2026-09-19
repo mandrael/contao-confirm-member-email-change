@@ -32,19 +32,29 @@ class RegistrationUsernameListenerTest extends ContaoTestCase
         $this->listener(true, $usernamePolicy)->onCreateNewUser(3, ['email' => 'new@example.com', 'username' => 'johndoe']);
     }
 
+    /**
+     * Codex 1: the model must carry the new login name when save() is called. Asserting
+     * on setRow() was exactly what hid the bug - setRow() replaces the whole row and
+     * marks nothing as modified, so save() wrote nothing at all.
+     */
     public function testSetsTheUsernameWhenEmptyAndEligible(): void
     {
         $usernamePolicy = $this->createMock(UsernamePolicy::class);
-        $usernamePolicy->method('evaluate')->with('new@example.com', 3)->willReturn(EligibilityReason::Eligible);
+        $usernamePolicy->method('evaluate')->with('New@Example.com', 3)->willReturn(EligibilityReason::Eligible);
 
-        $member = $this->createMock(MemberModel::class);
-        $member->expects(self::once())->method('setRow')->with(['username' => 'new@example.com'])->willReturn($member);
-        $member->expects(self::once())->method('save');
+        $member = $this->createClassWithPropertiesMock(MemberModel::class, ['id' => 3, 'username' => null, 'email' => 'New@Example.com']);
+        $member->expects(self::once())->method('save')->willReturnCallback(
+            static function () use ($member): void {
+                self::assertSame('new@example.com', $member->username, 'the login name has to be set BEFORE save()');
+            },
+        );
 
         $memberAdapter = $this->createConfiguredAdapterMock(['findByPk' => $member]);
         $framework = $this->createContaoFrameworkMock([MemberModel::class => $memberAdapter]);
 
-        $this->listener(true, $usernamePolicy, $framework)->onCreateNewUser(3, ['email' => 'new@example.com']);
+        $this->listener(true, $usernamePolicy, $framework)->onCreateNewUser(3, ['email' => 'New@Example.com']);
+
+        self::assertSame('new@example.com', $member->username);
     }
 
     public function testLeavesTheUsernameEmptyWhenNotEligible(): void

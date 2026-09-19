@@ -9,6 +9,7 @@ use Contao\MemberModel;
 use Contao\StringUtil;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\CanonicalUsername;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -34,6 +35,7 @@ final class SyncUsernamesCommand extends Command
     public function __construct(
         private readonly ContaoFramework $framework,
         private readonly UsernamePolicy $usernamePolicy,
+        private readonly EmailAsUsernamePolicy $policy,
     ) {
         parent::__construct();
     }
@@ -54,6 +56,16 @@ final class SyncUsernamesCommand extends Command
         $groupId = null !== $group ? (int) $group : null;
 
         $this->framework->initialize();
+
+        // The command is the migration path FOR the opt-in, not a way around it: with
+        // the switch off, writing every login name would silently change 1.0 behaviour
+        // and there is no command to undo it. The dry run stays available either way,
+        // so an operator can see what turning the switch on would do.
+        if ($force && !$this->policy->isEnabled()) {
+            $io->error('Der Schalter "memberEmailAsUsername" ist ausgeschaltet. --force schreibt nur bei eingeschaltetem Schalter; der Probelauf ohne --force ist jederzeit möglich.');
+
+            return Command::FAILURE;
+        }
 
         $members = $this->framework->getAdapter(MemberModel::class)->findAll();
         $rows = [];

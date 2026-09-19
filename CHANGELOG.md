@@ -46,6 +46,43 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - `terminal42/contao-mailusername` bleibt als Rückfall unterstützt, solange der eingebaute Opt-in
   ausgeschaltet ist. `heimrichhannot/contao-email2username-bundle` wird nicht mehr unterstützt (nutzt
   den in Contao 5 entfernten `importUser`-Hook und funktioniert dort nicht).
+- Ist `terminal42/contao-mailusername` installiert, liefert der eigene Schalter zur Laufzeit immer
+  „aus" und das Einstellungsfeld weist darauf hin. Bewusst kein `conflict` in der `composer.json`:
+  der würde bestehende Installationen des veröffentlichten Pakets vom Update aussperren.
+
+### Behoben
+- **Der Benutzername wurde in Backend und Registrierung tatsächlich nie geschrieben.** Beide Wege
+  nutzten `Model::setRow([...])->save()`; `setRow()` ersetzt die ganze Zeile und markiert nichts als
+  geändert, `save()` schrieb deshalb nichts und das Modell verlor im laufenden Request seine ID
+  (Core 5.3 `Model.php:376-393,547-568`). Jetzt wird die Eigenschaft gesetzt und gespeichert. Im
+  Backend wandert der Schreibvorgang zusätzlich aus dem Feld-Callback in `config.onsubmit`: der
+  Feld-Callback läuft in `DC_Table` **vor** der Eindeutigkeitsprüfung der E-Mail, ein dort
+  geschriebener Benutzername hätte eine anschließend abgelehnte Adresse überlebt. Er prüft weiter,
+  er schreibt nur nicht mehr.
+- „Benutzername = E-Mail" gilt jetzt lückenlos: Eine unzulässige Adresse wird in der Registrierung
+  abgewiesen, bevor das Mitglied entsteht, im Frontend schon beim Anfordern der Änderung, und eine
+  erst nachträglich unzulässig gewordene Adresse wird nicht bestätigt (der Link bleibt unverbraucht
+  und läuft ab). Eine unveränderte unzulässige Bestandsadresse blockiert das Speichern dagegen
+  nicht mehr, sondern hinterlässt nur einen Log-Eintrag mit der Mitglieds-ID. Der Vergleich „schon
+  synchron" prüft exakt gegen die kanonische Form statt `strcasecmp`, sonst galt
+  „Anna@example.com" fälschlich als synchron.
+- `member-email:sync-usernames --force` bricht bei ausgeschaltetem Schalter mit Fehlercode ab; der
+  Probelauf bleibt immer erlaubt.
+- **Bestätigung und Widerruf laufen jetzt nach demselben Sperrprotokoll:** Transaktion,
+  Zeilensperre auf das Mitglied, danach Mitglied, Link-Datensatz und Anker frisch und sperrend
+  nachlesen, dann Link-Verbrauch, Adresse, Benutzername, Anker und Token-Aufräumen gemeinsam
+  festschreiben. Vorher hatte die Bestätigung weder Transaktion noch Sperre, sodass ein
+  erfolgreicher Widerruf nachträglich überschrieben werden konnte. Der Widerruf sperrt nun über die
+  Mitglieds-ID statt über die nicht indizierte Anker-Spalte.
+- Schlägt der Versand des Widerrufslinks fehl, geht er nicht mehr verloren: Die neue Spalte
+  `tl_member.emailChangeAnchorNotified` wird erst nach erfolgreichem Versand gesetzt, und ein
+  stündlicher Cron stellt für gültige, unbenachrichtigte Anker einen neuen Link mit gleicher Frist
+  aus.
+- Technische Fehler im Widerruf enden in derselben allgemeinen Antwort statt in einer Fehlerseite;
+  zurückgerollt wird nur bei aktiver Transaktion, und ein Fehler nach dem Commit stellt den Erfolg
+  nicht mehr als Fehlschlag dar.
+- Die Bestätigungsseite sendet `Cache-Control: private, no-store` und `X-Robots-Tag: noindex`; der
+  Erfolgstext des Widerrufs nennt jetzt den Weg zu einem neuen Kennwort.
 
 ## [1.0.0] - 2026-09-18
 

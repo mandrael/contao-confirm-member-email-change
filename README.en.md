@@ -65,6 +65,17 @@ governs the login name:
   different username is corrected the next time the member is saved; the one exception is a still
   **unconfirmed** email change - there the username stays at the old, still-valid address until it
   is confirmed.
+- **Rejected before anything comes into existence:** an ineligible address is turned down when the
+  form is saved - during registration (no member is created at all), in the self-service profile
+  (the change is not even requested) and in the back end. If it only becomes ineligible between
+  the request and the confirmation, e.g. because another member took the name meanwhile, the
+  change is **not** confirmed; the link stays unused and expires by itself after 24 hours.
+- **Existing records stay editable:** an address that was ALREADY stored while being ineligible
+  does **not** block saving the member. It is only rejected when it is changed; otherwise the
+  previous username stays and a log entry with the member ID is written.
+- **Limit of the automatic sync:** it hangs off Contao's DCA callbacks. A foreign `Model::save()`,
+  a direct SQL write or an import does not fire those callbacks and can therefore let the username
+  drift apart. That is what the `member-email:sync-usernames` console command below repairs.
 - **The username field itself is no longer editable:** neither in the back end nor in a front end
   module (self-service profile, registration) - even if a module still has "username" configured
   as an editable field from before the switch was turned on.
@@ -80,7 +91,9 @@ governs the login name:
   # Dry run (default) – prints only the ID and case class per member, no emails/usernames
   vendor/bin/contao-console member-email:sync-usernames
 
-  # Actually writes the changes (back up the database first)
+  # Actually writes the changes (back up the database first).
+  # Only with the switch turned on - otherwise the command aborts with an error code,
+  # so a disabled opt-in can never rewrite the whole member base anyway.
   vendor/bin/contao-console member-email:sync-usernames --force
 
   # Limit to one member group
@@ -94,7 +107,7 @@ Either the built-in opt-in above **or** one of the following extensions – not 
 
 | Extension | Behaviour with this bundle |
 |---|---|
-| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Pure sync `username = email`. On confirmation the username is carried over **verbatim** (otherwise login with the new address would break). Only relevant while the built-in opt-in above is **off**. |
+| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Pure sync `username = email`. On confirmation the username is carried over **verbatim** (otherwise login with the new address would break). While the package is installed, the built-in switch stays **without effect** - it is treated as "off" at runtime and the settings field says so. Deliberately no composer `conflict`: that would lock existing installs of the published package out of an update. |
 | heimrichhannot/contao-email2username-bundle | **Not Contao 5-ready:** version 1.4.0 relies on the "importUser" hook, which Contao 5 removed, so it is no longer supported here. |
 
 With the built-in opt-in off and neither extension active, `tl_member.username` is left
@@ -109,7 +122,8 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
 14 days.
 
 - **Anchor, not the core `OptIn`:** dedicated, SQL-only columns on `tl_member`
-  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`) instead of the
+  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`,
+  `emailChangeAnchorNotified`) instead of the
   core opt-in mechanism, whose validity window is hard-coded differently per Contao version.
   Only the SHA-256 hash of the token is stored; the plaintext only ever exists in the mail.
 - **Chain rule:** if a still-valid anchor already exists at the next confirmed change, it stays
@@ -125,8 +139,22 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   success: the old address is restored, the username is carried back via the same follow rule as
   above, the password is invalidated (the `login` field is never touched – that stays the
   operator's call), every unconfirmed opt-in token of the member is deleted, and a currently
-  logged-in session of that same member is logged out. Every failure shows the exact same
-  generic message, regardless of the reason.
+  logged-in session of that same member is logged out. If the username cannot follow the restored
+  address because somebody else carries it meanwhile, the revocation still goes through - address
+  and password are a security function and must not fail over it; the username then stays as it is
+  and the operator gets a log entry. Every failure shows the exact same generic message, regardless
+  of the reason - a purely technical one included.
+- **A lost notice:** only the hash is stored, the plaintext link exists nowhere but in the mail. A
+  failed send would leave the only way back unusable, so `emailChangeAnchorNotified` is set only
+  once the mail really went out; an hourly cron issues a **new** link for valid, unnotified anchors
+  (new hash, same target address, **same deadline** - the window is never extended). When that cron
+  runs on the CLI, `framework.router.default_uri` has to be set, otherwise the command line does
+  not know the site's domain.
+- **Locking protocol:** confirmation and revocation follow the same steps - transaction, member row
+  lock (`SELECT ... FOR UPDATE`), then re-read everything freshly and with locking reads, then
+  commit link consumption, address, username, anchor and the cleanup of pending tokens together.
+  Deliberately **without** a named `GET_LOCK`: a directory bundle that takes a named lock BEFORE
+  this row lock would otherwise end up with the opposite lock order.
 - **Cleanup:** a daily cron clears expired anchor fields so old addresses don't linger in
   `tl_member` indefinitely.
 

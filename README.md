@@ -66,6 +66,19 @@ gilt für den Login-Namen ausschließlich diese Regel:
   E-Mail-Änderung. Ein bereits abweichender Benutzername wird beim nächsten Speichern des
   Mitglieds korrigiert; einzige Ausnahme ist eine noch **unbestätigte** E-Mail-Änderung – dort
   bleibt der Benutzername bis zur Bestätigung an der alten, noch gültigen Adresse.
+- **Abgelehnt wird, bevor etwas entsteht:** Eine unzulässige Adresse wird schon beim Speichern
+  des Formulars abgewiesen – in der Registrierung (das Mitglied wird gar nicht erst angelegt),
+  im Self-Service-Profil (die Änderung wird nicht einmal angefordert) und im Backend. Wird sie
+  erst zwischen Anforderung und Bestätigung unzulässig, etwa weil ein anderes Mitglied den
+  Namen inzwischen belegt, wird die Änderung **nicht** bestätigt; der Link bleibt unverbraucht
+  und läuft nach 24 Stunden von selbst ab.
+- **Bestandsschutz beim Bearbeiten:** Eine bereits gespeicherte unzulässige Adresse blockiert das
+  Speichern des Mitglieds **nicht**. Sie wird nur abgewiesen, wenn sie geändert wird; andernfalls
+  bleibt der bisherige Benutzername stehen und es gibt einen Log-Eintrag mit der Mitglieds-ID.
+- **Grenze der Automatik:** Der Abgleich hängt an Contaos DCA-Callbacks. Ein fremdes
+  `Model::save()`, ein direkter SQL-Schreibzugriff oder ein Import lösen diese Callbacks nicht aus
+  und können den Benutzernamen daher auseinanderlaufen lassen. Dafür gibt es den Konsolenbefehl
+  `member-email:sync-usernames` (siehe unten), der genau das repariert.
 - **Das Benutzername-Feld selbst ist nicht mehr editierbar:** weder im Backend noch in einem
   Frontend-Modul (Self-Service-Profil, Registrierung) – auch dann nicht, wenn ein Modul
   „username" noch aus der Zeit vor dem Einschalten als editierbares Feld konfiguriert hat.
@@ -83,7 +96,9 @@ gilt für den Login-Namen ausschließlich diese Regel:
   # Probelauf (Standard) – zeigt je Mitglied nur ID und Fallklasse, keine E-Mail-Adressen/Namen
   vendor/bin/contao-console member-email:sync-usernames
 
-  # Schreibt tatsächlich (vorher ein Datenbank-Backup anlegen)
+  # Schreibt tatsächlich (vorher ein Datenbank-Backup anlegen).
+  # Nur bei eingeschaltetem Schalter – sonst bricht der Befehl mit Fehlercode ab,
+  # damit ein ausgeschalteter Opt-in nicht doch den ganzen Bestand umstellt.
   vendor/bin/contao-console member-email:sync-usernames --force
 
   # Auf eine Mitgliedergruppe begrenzen
@@ -97,7 +112,7 @@ dasselbe Feld):
 
 | Erweiterung | Verhalten mit diesem Bundle |
 |---|---|
-| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). Nur relevant, solange der eigene Opt-in oben **ausgeschaltet** ist. |
+| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). Ist das Paket installiert, bleibt der eigene Schalter **ohne Wirkung** – er wird zur Laufzeit als „aus" behandelt, und das Einstellungsfeld sagt das auch. Bewusst kein `conflict` in der `composer.json`: der würde bestehende Installationen des veröffentlichten Pakets vom Update aussperren. |
 | heimrichhannot/contao-email2username-bundle | **Nicht Contao-5-tauglich:** Version 1.4.0 nutzt den in Contao 5 entfernten `importUser`-Hook und wird daher nicht mehr unterstützt. |
 
 Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt
@@ -112,7 +127,8 @@ zusätzlich einen **Sicherheitsanker** an: Die alte Adresse erhält eine zweite 
 Link, der die Änderung 14 Tage lang rückgängig machen kann.
 
 - **Anker, nicht Core-`OptIn`:** eigene, nur per SQL angelegte Felder an `tl_member`
-  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`) statt des
+  (`emailChangeAnchorHash`, `emailChangeAnchorEmail`, `emailChangeAnchorExpires`,
+  `emailChangeAnchorNotified`) statt des
   Core-Opt-in-Mechanismus, dessen Gültigkeit je Contao-Version unterschiedlich fest verdrahtet
   ist. Gespeichert wird nur der SHA-256-Hash des Tokens, der Klartext steht ausschließlich in
   der Mail.
@@ -129,8 +145,24 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   inzwischen einem anderen Konto gehört. Bei Erfolg: alte Adresse wiederhergestellt, Benutzername
   nach derselben Folgeregel wie oben zurückgeführt, Kennwort ungültig gemacht (kein login-Feld
   wird angetastet – das bleibt Betreiber-Sache), alle unbestätigten Opt-in-Token des Mitglieds
-  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Jeder Fehlschlag zeigt
-  dieselbe allgemeine Meldung, unabhängig vom Grund.
+  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Kann der Benutzername
+  der wiederhergestellten Adresse nicht folgen, weil ihn inzwischen jemand anderes trägt, wird der
+  Widerruf trotzdem durchgeführt – Adresse und Kennwort sind eine Sicherheitsfunktion und dürfen
+  daran nicht scheitern; der Benutzername bleibt dann stehen und der Betreiber bekommt einen
+  Log-Eintrag. Jeder Fehlschlag zeigt dieselbe allgemeine Meldung, unabhängig vom Grund – auch ein
+  rein technischer.
+- **Verlorene Benachrichtigung:** Gespeichert wird nur der Hash, den Klartext-Link gibt es
+  ausschließlich in der Mail. Schlägt der Versand fehl, bliebe die einzige Rückholmöglichkeit
+  unbrauchbar. Deshalb wird `emailChangeAnchorNotified` erst gesetzt, wenn die Mail wirklich
+  draußen ist; ein stündlicher Cron stellt für gültige, unbenachrichtigte Anker einen **neuen**
+  Link aus (neuer Hash, gleiche Zieladresse, **gleiche Frist** – die Frist wird nie verlängert).
+  Läuft der Cron per CLI, muss `framework.router.default_uri` gesetzt sein, sonst kennt die
+  Kommandozeile die Domain der Website nicht.
+- **Sperrprotokoll:** Bestätigung und Widerruf laufen nach demselben Ablauf – Transaktion,
+  Zeilensperre auf das Mitglied (`SELECT … FOR UPDATE`), danach alles frisch und sperrend
+  nachlesen, dann Link-Verbrauch, Adresse, Benutzername, Anker und das Aufräumen offener Token
+  gemeinsam festschreiben. Bewusst **ohne** benannten `GET_LOCK`: ein Verzeichnis-Bundle, das vor
+  dieser Zeilensperre einen benannten Lock nimmt, bekäme sonst die umgekehrte Sperrreihenfolge.
 - **Aufräumen:** Ein täglicher Cron leert abgelaufene Anker-Felder, damit alte Adressen nicht
   unbegrenzt in `tl_member` liegen bleiben.
 

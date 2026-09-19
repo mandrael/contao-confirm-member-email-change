@@ -48,6 +48,6 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormTitle'] = 'E-Mail-Ä
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormText'] = 'Möchten Sie die zuletzt vorgenommene Änderung Ihrer E-Mail-Adresse rückgängig machen? Ihre bisherige Adresse wird wiederhergestellt, Ihr Kennwort wird ungültig.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeButton'] = 'Änderung widerrufen';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccessTitle'] = 'Änderung widerrufen';
-$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'Die Änderung wurde rückgängig gemacht. Bitte vergeben Sie ein neues Kennwort.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'Die Änderung wurde rückgängig gemacht. Ihr bisheriges Kennwort ist nicht mehr gültig. Bitte vergeben Sie über „Passwort vergessen“ beziehungsweise die Login-Hilfe dieser Website ein neues Kennwort.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeErrorTitle'] = 'Widerruf nicht möglich';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeInvalid'] = 'Der Link ist ungültig oder abgelaufen.';

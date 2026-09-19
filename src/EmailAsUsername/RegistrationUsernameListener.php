@@ -10,6 +10,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\DataContainer;
 use Contao\MemberModel;
 use Contao\System;
+use Psr\Log\LoggerInterface;
 
 /**
  * A3 (bullet 2): registration. ModuleRegistration inserts the new row itself
@@ -31,6 +32,7 @@ final class RegistrationUsernameListener
         private readonly EmailAsUsernamePolicy $policy,
         private readonly UsernamePolicy $usernamePolicy,
         private readonly ContaoFramework $framework,
+        private readonly LoggerInterface|null $logger = null,
     ) {
     }
 
@@ -48,11 +50,28 @@ final class RegistrationUsernameListener
         $email = (string) ($arrData['email'] ?? '');
 
         if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($email, $insertId)) {
-            return; // Not eligible as a username → stays empty, fixable later via the console command.
+            // UsernameSyncListener::onSaveEmail already rejected an ineligible address
+            // before the row was inserted, so getting here means the address became
+            // ineligible in between (a parallel registration took it). Leave the
+            // username empty rather than guess; member-email:sync-usernames fixes it.
+            $this->logger?->warning(\sprintf('Member ID %d was registered without a login name: the address is not eligible as one.', $insertId));
+
+            return;
         }
 
         $member = $this->framework->getAdapter(MemberModel::class)->findByPk($insertId);
-        $member?->setRow(['username' => CanonicalUsername::normalize($email)])->save();
+
+        if (null === $member) {
+            $this->logger?->warning(\sprintf('Member ID %d disappeared before its login name could be set.', $insertId));
+
+            return;
+        }
+
+        // NOT setRow(): that replaces the whole row and marks nothing as modified, so
+        // the following save() would write nothing at all and strip the model of its
+        // id (Contao Model::setRow()/save(), core 5.3 Model.php:376-393,547-568).
+        $member->username = CanonicalUsername::normalize($email);
+        $member->save();
     }
 
     /**

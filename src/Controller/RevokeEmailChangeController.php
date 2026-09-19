@@ -98,89 +98,152 @@ class RevokeEmailChangeController
     }
 
     /**
-     * POST: everything happens under a SELECT ... FOR UPDATE row lock inside one
-     * transaction, using raw DBAL rather than the Model layer, so a concurrent
-     * request (e.g. the same link opened twice) can never interleave with this one.
+     * POST: the transactional part runs in revokeUnderLock(); everything a technical
+     * failure could throw ends in the SAME generic answer as an invalid link, because a
+     * distinguishable error page would say something about this account. A failure
+     * AFTER the commit must not present the applied revoke as a failed one either.
      */
     private function revoke(string $token): Response
     {
-        $hash = EmailChangeAnchorPolicy::hashToken($token);
-
-        $this->connection->beginTransaction();
-
         try {
-            $row = $this->connection->fetchAssociative(
-                'SELECT id, email, username, emailChangeAnchorHash, emailChangeAnchorEmail, emailChangeAnchorExpires FROM tl_member WHERE emailChangeAnchorHash = ? FOR UPDATE',
-                [$hash],
-            );
-
-            if (
-                false === $row
-                || !EmailChangeAnchorPolicy::matchesToken((string) $row['emailChangeAnchorHash'], $token)
-                || !EmailChangeAnchorPolicy::hasValidAnchor((string) $row['emailChangeAnchorHash'], (int) $row['emailChangeAnchorExpires'], time())
-            ) {
-                $this->connection->rollBack();
-
-                return $this->invalidPage();
-            }
-
-            $memberId = (int) $row['id'];
-            $restoredEmail = (string) $row['emailChangeAnchorEmail'];
-
-            $conflict = (int) $this->connection->fetchOne(
-                'SELECT COUNT(*) FROM tl_member WHERE email = ? AND id != ?',
-                [$restoredEmail, $memberId],
-            );
-
-            if ($conflict > 0) {
-                $this->connection->rollBack();
-                $this->logger?->warning(\sprintf('Email-change revoke for member ID %d aborted: the restored address is meanwhile taken by another member.', $memberId));
-
-                return $this->invalidPage();
-            }
-
-            // Same sync as ConfirmEmailChangeController, just backwards: the
-            // "current" email is the (possibly compromised) address being replaced,
-            // the "new" one is the address being restored.
-            $newUsername = $this->usernameChangeSync->resolve(
-                (string) ($row['username'] ?? ''),
-                (string) $row['email'],
-                $restoredEmail,
-                $memberId,
-            ) ?? (string) $row['username'];
-
-            $this->connection->executeStatement(
-                'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, tstamp = ? WHERE id = ?',
-                [$restoredEmail, $newUsername, $this->invalidatedPasswordHash(), '', '', time(), $memberId],
-            );
-
-            // The account just changed hands (back) – kill whatever password-reset /
-            // email-change / access-setup token happens to be pending too, not just
-            // this anchor.
-            $this->tokenPurger->purgeAll($memberId);
-
-            $this->connection->commit();
+            $memberId = $this->revokeUnderLock($token);
         } catch (\Throwable $e) {
+            // Roll back only while a transaction is actually open.
             if ($this->connection->isTransactionActive()) {
-                $this->connection->rollBack();
+                try {
+                    $this->connection->rollBack();
+                } catch (\Throwable) {
+                    // Connection already gone – there is nothing left to undo.
+                }
             }
 
-            throw $e;
+            $this->logger?->error(\sprintf('Email-change revoke failed with %s.', $e::class));
+
+            return $this->invalidPage();
+        }
+
+        if (null === $memberId) {
+            return $this->invalidPage();
         }
 
         $response = $this->page('revokeSuccessTitle', 'revokeSuccess', '', Response::HTTP_OK);
 
-        // Only log out if the browser submitting THIS request happens to be
-        // authenticated as the very member being restored – never anyone else's
-        // session (unlike the confirm controller, the person clicking a mailed link
-        // is not necessarily the one currently browsing in this browser).
-        $user = $this->security->getUser();
+        try {
+            // Only log out if the browser submitting THIS request happens to be
+            // authenticated as the very member being restored – never anyone else's
+            // session (unlike the confirm controller, the person clicking a mailed link
+            // is not necessarily the one currently browsing in this browser).
+            $user = $this->security->getUser();
 
-        if ($user instanceof FrontendUser && (int) $user->id === $memberId) {
-            $this->carryOverLogoutCookies($this->security->logout(false), $response);
+            if ($user instanceof FrontendUser && (int) $user->id === $memberId) {
+                $this->carryOverLogoutCookies($this->security->logout(false), $response);
+            }
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Logout after a committed email-change revoke for member ID %d failed with %s; the revoke itself is applied.', $memberId, $e::class));
         }
 
         return $response;
+    }
+
+    /**
+     * The protocol shared with ConfirmEmailChangeController: transaction, member row
+     * lock by id, then a fresh (locking) read of everything the decision rests on, then
+     * anchor, address, login name, password and the pending tokens committed together.
+     * Raw DBAL rather than the Model layer, so nothing works off a registry copy that
+     * predates the lock. No named GET_LOCK here on purpose – the directory bundle takes
+     * one BEFORE this row lock, a second one here would invert the order.
+     *
+     * @return int|null the member id on success, null when the link does not apply
+     */
+    private function revokeUnderLock(string $token): ?int
+    {
+        // Look the row up WITHOUT a lock first: emailChangeAnchorHash carries no index,
+        // so a locking read on it would lock every row the scan touches. This id may be
+        // stale by the time the lock is granted, which is why everything below is
+        // verified again against the locked row.
+        $memberId = (int) $this->connection->fetchOne(
+            'SELECT id FROM tl_member WHERE emailChangeAnchorHash = ?',
+            [EmailChangeAnchorPolicy::hashToken($token)],
+        );
+
+        if ($memberId < 1) {
+            return null;
+        }
+
+        $this->connection->beginTransaction();
+
+        $row = $this->connection->fetchAssociative(
+            'SELECT id, email, username, emailChangeAnchorHash, emailChangeAnchorEmail, emailChangeAnchorExpires FROM tl_member WHERE id = ? FOR UPDATE',
+            [$memberId],
+        );
+
+        if (
+            false === $row
+            || !EmailChangeAnchorPolicy::matchesToken((string) $row['emailChangeAnchorHash'], $token)
+            || !EmailChangeAnchorPolicy::hasValidAnchor((string) $row['emailChangeAnchorHash'], (int) $row['emailChangeAnchorExpires'], time())
+        ) {
+            $this->connection->rollBack();
+
+            return null;
+        }
+
+        $restoredEmail = (string) $row['emailChangeAnchorEmail'];
+
+        if ('' === $restoredEmail) {
+            $this->connection->rollBack();
+
+            return null;
+        }
+
+        $conflict = (int) $this->connection->fetchOne(
+            'SELECT COUNT(*) FROM tl_member WHERE email = ? AND id != ?',
+            [$restoredEmail, $memberId],
+        );
+
+        if ($conflict > 0) {
+            $this->connection->rollBack();
+            $this->logger?->warning(\sprintf('Email-change revoke for member ID %d aborted: the restored address is meanwhile taken by another member.', $memberId));
+
+            return null;
+        }
+
+        // Same sync as ConfirmEmailChangeController, just backwards: the "current"
+        // email is the (possibly compromised) address being replaced, the "new" one is
+        // the address being restored.
+        $oldUsername = (string) ($row['username'] ?? '');
+        $newUsername = $this->usernameChangeSync->resolve($oldUsername, (string) $row['email'], $restoredEmail, $memberId);
+
+        if (null === $newUsername && $this->usernameChangeSync->rejects($restoredEmail, $memberId)) {
+            // The restored address cannot become the login name again, typically because
+            // somebody else took it meanwhile. The revoke is a SECURITY function and must
+            // NOT fail over it: address and password are put right regardless, only the
+            // login name stays behind. The operator gets a log entry to sort it out.
+            $this->logger?->error(\sprintf('Email-change revoke for member ID %d kept the previous login name: the restored address is not eligible as one. Please correct it manually.', $memberId));
+        }
+
+        // tl_member.username carries a UNIQUE index and is nullable, so it is only ever
+        // written with a real value, never blanked back to an empty string.
+        if (null !== $newUsername && '' !== $newUsername && $newUsername !== $oldUsername) {
+            $this->connection->executeStatement(
+                'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, tstamp = ? WHERE id = ?',
+                [$restoredEmail, $newUsername, $this->invalidatedPasswordHash(), '', '', time(), $memberId],
+            );
+        } else {
+            $this->connection->executeStatement(
+                'UPDATE tl_member SET email = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, tstamp = ? WHERE id = ?',
+                [$restoredEmail, $this->invalidatedPasswordHash(), '', '', time(), $memberId],
+            );
+        }
+
+        // The account just changed hands (back) – kill whatever password-reset /
+        // email-change / access-setup token happens to be pending too, not just this
+        // anchor. Contao's Model layer uses this very connection (core Database.php:64-66),
+        // so these deletes are part of the same transaction.
+        $this->tokenPurger->purgeAll($memberId);
+
+        $this->connection->commit();
+
+        return $memberId;
     }
 
     /**
