@@ -27,3 +27,27 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Back to the ho
 
 // Replaces Contao's generic uniqueness error in the FE profile
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'This email address already exists.';
+
+// A2 (email as username opt-in): rejection when the address cannot be used as a login name
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['usernameRejected'] = 'This address cannot be used as a login name.';
+
+// A7 (email as username opt-in): username field label on the login form (there only, see
+// LoginLabelListener - not MSC.username, that one is global).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['loginUsernameLabel'] = 'Email address';
+
+// A8: security anchor - second notice to the old address AFTER confirmation.
+// %d = validity in days (EmailChangeAnchorPolicy::ttlDays()), %s = revoke link.
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeSubject'] = 'Your email address has been changed';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeText'] = "Your email address has been changed. Wasn't you? This link undoes the change (valid for %d days):\n\n%s";
+// Chained case: an older, still-valid anchor is kept - this address deliberately gets
+// NO link (it might belong to the attacker).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeChainedText'] = 'Your email address has been changed. A revocation for this account is already possible via an earlier notice.';
+
+// A8: confirmation page (GET) and the outcome of the revocation (POST).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormTitle'] = 'Revoke the email change';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormText'] = 'Do you want to undo the most recent change of your email address? Your previous address will be restored and your password invalidated.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeButton'] = 'Revoke the change';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccessTitle'] = 'Change revoked';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'The change has been undone. Your previous password is no longer valid. Please set a new one via the "forgot password" function or the login help of this website.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeErrorTitle'] = 'Revocation not possible';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeInvalid'] = 'The link is invalid or has expired.';

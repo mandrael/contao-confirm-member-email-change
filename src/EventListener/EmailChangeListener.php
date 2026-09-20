@@ -12,7 +12,8 @@ use Contao\CoreBundle\OptIn\OptIn;
 use Contao\Email;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
-use Contao\OptInModel;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -46,6 +47,8 @@ class EmailChangeListener
         private readonly TranslatorInterface $translator,
         private readonly UrlGeneratorInterface $urlGenerator,
         private readonly RequestStack $requestStack,
+        private readonly UnconfirmedTokenPurger $tokenPurger,
+        private readonly LoggerInterface|null $logger = null,
     ) {
     }
 
@@ -55,7 +58,7 @@ class EmailChangeListener
      * The same DCA save_callback also fires during registration (invoked as
      * ($value, null)) and in the back end (as ($value, DataContainer)); only
      * ModulePersonalData passes (FrontendUser, ModulePersonalData). We therefore
-     * accept a broad signature and act ONLY for the personal-data case — leaving
+     * accept a broad signature and act ONLY for the personal-data case – leaving
      * the value untouched everywhere else (a narrow typed signature would fatal
      * on registration/back-end saves). Returning the OLD value suppresses the
      * core write (guarded by `if ($varValue !== $user->$field)`).
@@ -103,11 +106,19 @@ class EmailChangeListener
 
     /**
      * Runs after all field callbacks on a successful personal-data submit (invoked
-     * as ($user, $module); in the back end as ($dc)). Only here — once the password
-     * field's opt-in purge has already run — do we create and send the confirmation
+     * as ($user, $module); in the back end as ($dc)). Only here – once the password
+     * field's opt-in purge has already run – do we create and send the confirmation
      * token, so it cannot be deleted within the same submit. onsubmit fires on every
      * successful submit regardless of which fields changed, so the email-only case
      * is covered too.
+     *
+     * DeepSeek W-4 (Runde 2): ModulePersonalData calls its onsubmit_callbacks with no
+     * try/catch of its own, so a mail failure here (typically: no effective administrator
+     * address configured, see Email::send()) would otherwise surface as an uncaught
+     * exception – a 500 for a member who just successfully changed their data. Both
+     * sends therefore get their own error boundary: a lost confirmation and a lost
+     * old-address notice are independent failures, and losing one must not swallow the
+     * other. Neither log line carries an address.
      */
     #[AsCallback(table: 'tl_member', target: 'config.onsubmit', priority: 255)]
     public function onSubmit(mixed $userOrDc = null, mixed $module = null): void
@@ -120,28 +131,36 @@ class EmailChangeListener
         $this->pendingChange = null;
 
         // Replace any earlier unconfirmed email-change token of this member.
-        $this->purgePendingTokens($memberId);
+        $this->tokenPurger->purge($memberId, self::PREFIX);
 
-        $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
+        try {
+            $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
 
-        $url = $this->urlGenerator->generate(
-            'mandrael_confirm_member_email_change',
-            ['token' => $token->getIdentifier()],
-            UrlGeneratorInterface::ABSOLUTE_URL,
-        );
+            $url = $this->urlGenerator->generate(
+                'mandrael_confirm_member_email_change',
+                ['token' => $token->getIdentifier()],
+                UrlGeneratorInterface::ABSOLUTE_URL,
+            );
 
-        $token->send(
-            $this->trans('confirmEmailChange.subject'),
-            \sprintf($this->trans('confirmEmailChange.text'), $url),
-        );
+            $token->send(
+                $this->trans('confirmEmailChange.subject'),
+                \sprintf($this->trans('confirmEmailChange.text'), $url),
+            );
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Could not send the email-change confirmation link for member ID %d: %s.', $memberId, $e::class));
+        }
 
-        // Security: tell the OLD address that a change was requested.
-        $this->notifyOldAddress($oldEmail, $newEmail);
+        try {
+            // Security: tell the OLD address that a change was requested.
+            $this->notifyOldAddress($oldEmail, $newEmail);
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Could not notify the previous address about a pending email change for member ID %d: %s.', $memberId, $e::class));
+        }
     }
 
     /**
      * On the front end, replace Contao's generic "this entry already exists" unique
-     * error with an email-specific one — on the profile form the only editable unique
+     * error with an email-specific one – on the profile form the only editable unique
      * field is the email address. The back end keeps the generic message.
      */
     #[AsHook('loadLanguageFile')]
@@ -158,28 +177,14 @@ class EmailChangeListener
         }
 
         // Only for the personal-data module submit (FORM_SUBMIT = "tl_member_<id>").
-        // Other frontend forms with a unique field — notably registration with a
-        // duplicate username ("tl_registration_<id>") — must keep the generic message.
+        // Other frontend forms with a unique field – notably registration with a
+        // duplicate username ("tl_registration_<id>") – must keep the generic message.
         if (!str_starts_with((string) $request->request->get('FORM_SUBMIT'), 'tl_member_')) {
             return;
         }
 
         if (isset($GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'])) {
             $GLOBALS['TL_LANG']['ERR']['unique'] = $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'];
-        }
-    }
-
-    private function purgePendingTokens(int $memberId): void
-    {
-        $tokens = $this->framework
-            ->getAdapter(OptInModel::class)
-            ->findUnconfirmedByRelatedTableAndId('tl_member', $memberId)
-        ;
-
-        foreach ($tokens ?? [] as $model) {
-            if (str_starts_with((string) $model->token, self::PREFIX.'-')) {
-                $model->delete();
-            }
         }
     }
 

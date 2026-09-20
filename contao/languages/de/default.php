@@ -27,3 +27,27 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['backToSite'] = 'Zur Startseite
 
 // Ersetzt Contaos generische Unique-Meldung im FE-Profil
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'Diese E-Mail-Adresse existiert bereits.';
+
+// A2 (E-Mail als Benutzername, Opt-in): Ablehnung, wenn die Adresse nicht als Login-Name taugt
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['usernameRejected'] = 'Diese Adresse kann nicht als Login-Name verwendet werden.';
+
+// A7 (E-Mail als Benutzername, Opt-in): Beschriftung des Benutzername-Felds im Login-Formular
+// (nur dort, siehe LoginLabelListener – nicht MSC.username, das ist global).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['loginUsernameLabel'] = 'E-Mail-Adresse';
+
+// A8: Sicherheitsanker – zweite Benachrichtigung an die alte Adresse NACH der Bestätigung.
+// %d = Gültigkeitsdauer in Tagen (EmailChangeAnchorPolicy::ttlDays()), %s = Widerrufslink.
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeSubject'] = 'Ihre E-Mail-Adresse wurde geändert';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeText'] = "Ihre E-Mail-Adresse wurde geändert. Waren das nicht Sie? Dieser Link macht die Änderung rückgängig (gültig %d Tage):\n\n%s";
+// Kettenfall: ein älterer, noch gültiger Anker bleibt bestehen – diese Adresse bekommt
+// bewusst KEINEN Link (sie könnte dem Angreifer gehören).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeNoticeChainedText'] = 'Ihre E-Mail-Adresse wurde geändert. Für dieses Konto ist bereits über eine frühere Benachrichtigung ein Widerruf möglich.';
+
+// A8: Bestätigungsseite (GET) und Ergebnis des Widerrufs (POST).
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormTitle'] = 'E-Mail-Änderung widerrufen';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeFormText'] = 'Möchten Sie die zuletzt vorgenommene Änderung Ihrer E-Mail-Adresse rückgängig machen? Ihre bisherige Adresse wird wiederhergestellt, Ihr Kennwort wird ungültig.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeButton'] = 'Änderung widerrufen';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccessTitle'] = 'Änderung widerrufen';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeSuccess'] = 'Die Änderung wurde rückgängig gemacht. Ihr bisheriges Kennwort ist nicht mehr gültig. Bitte vergeben Sie über „Passwort vergessen“ beziehungsweise die Login-Hilfe dieser Website ein neues Kennwort.';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeErrorTitle'] = 'Widerruf nicht möglich';
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['revokeInvalid'] = 'Der Link ist ungültig oder abgelaufen.';
