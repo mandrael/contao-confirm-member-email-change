@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 /**
  * Codex 1 (Runde 2, blockierend): the core's DC_Table::copy() copies every field that
  * lacks eval.doNotCopy verbatim - including a still-valid revoke anchor. Two members
- * would then answer to the same anchor hash until one of them is edited. All four
+ * would then answer to the same anchor hash until one of them is edited. All five
  * anchor fields (see AnchorNotice/EmailChangeAnchorPolicy) must therefore reset to
  * their SQL default on copy.
  */

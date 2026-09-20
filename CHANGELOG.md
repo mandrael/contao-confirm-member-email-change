@@ -4,6 +4,19 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.1] - Unveröffentlicht
+
+### Behoben
+- `member-email:sync-usernames --group=<wert>` lehnt einen nicht numerischen Wert mit Fehlercode ab.
+  Vorher galt er als Gruppe 0, traf kein Mitglied und endete scheinbar erfolgreich.
+- Einstellungstext: Der Schalter „E-Mail als Benutzername" nennt jetzt ausdrücklich, dass er nur
+  Mitglieder betrifft, nicht Backend-Benutzer.
+- `composer.json`: direkt benutzte Pakete `psr/log` und `symfony/event-dispatcher` als
+  Abhängigkeit eingetragen (kamen bisher nur indirekt über Contao).
+- README: Ablauf richtig beschrieben (der Bestätigungslink entsteht nach dem Speichern, nicht im
+  Feld-Callback), Hinweis auf `contao:migrate` ergänzt, irreführende Begründung zum
+  Versandfehler entfernt.
+
 ## [1.1.0] - 2026-09-21
 
 ### Hinzugefügt
@@ -13,7 +26,7 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
   das Login-Formular zeigt „E-Mail-Adresse". Unzulässige Adressen (über 64 Zeichen, unerlaubte
   Zeichen, Kollision) werden beim Speichern abgelehnt.
 - Befehl `member-email:sync-usernames` (Probelauf als Standard, `--force` schreibt, `--group=<id>`):
-  gleicht den Bestand auf einmal ab. Gibt nur Mitglieds-IDs aus.
+  gleicht den Bestand auf einmal ab. Gibt nur Mitglieds-IDs und Fallklassen aus, nie Adressen oder Namen.
 - Anmeldung mit abweichender Groß-/Kleinschreibung der E-Mail, unabhängig vom Schalter.
 - Widerrufslink: Nach einer bestätigten Adressänderung erhält die alte Adresse einen 14 Tage
   gültigen Link, der die Änderung rückgängig macht, das Kennwort ungültig setzt und offene Links

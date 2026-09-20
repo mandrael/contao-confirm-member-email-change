@@ -55,6 +55,13 @@ final class SyncUsernamesCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $force = (bool) $input->getOption('force');
         $group = $input->getOption('group');
+        // A typo must not look like "nothing to do": (int) 'abc' is 0 and matched no member.
+        if (null !== $group && (!\is_string($group) || !ctype_digit($group) || (int) $group < 1)) {
+            $io->error('--group erwartet die numerische ID einer Mitgliedergruppe.');
+
+            return Command::FAILURE;
+        }
+
         $groupId = null !== $group ? (int) $group : null;
 
         $this->framework->initialize();

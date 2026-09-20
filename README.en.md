@@ -25,8 +25,9 @@ a confirmation link. Closes a gap acknowledged by the Contao core team itself
 ## How it works
 
 1. The member changes their email in the profile.
-2. A high-priority `fields.email.save` callback intercepts the change, creates a core `OptIn`
-   token and sends a confirmation link to the **new** address. The old address gets a security
+2. A high-priority `fields.email.save` callback intercepts the change; after the
+   form is saved (`config.onsubmit`) a core `OptIn` token is created and a confirmation link is sent
+   to the **new** address. The old address gets a security
    notice. The profile keeps showing the **old** address (no lockout, login still works) – with a
    prominent green notice that the change still needs to be confirmed.
 3. The member opens the link → a thin controller confirms the token, writes the new address and
@@ -41,7 +42,8 @@ composer require mandrael/contao-confirm-member-email-change
 ```
 
 The bundle registers itself via the Contao Manager Plugin – **no further configuration
-needed**. After clicking the confirmation link the member sees a short confirmation page.
+needed**. Run `contao:migrate` after installing and after every update (the package adds columns to
+`tl_member`). After clicking the confirmation link the member sees a short confirmation page.
 If an email login is active (see below), they are logged out in the process and then sign in
 with the new address.
 
@@ -52,8 +54,8 @@ with the new address.
 
 > **Requirement:** an effective administrator email address must be set – either on the root
 > page or in the global settings. Without it every send (confirmation, security notice, revoke
-> link) fails; the form still reports the same success to the visitor (otherwise the error
-> message would let them guess which address is already taken) – a failed send is visible only
+> link) fails; the form still reports the same success to the visitor (a failed send is
+> never mirrored to the visitor) – a failed send is visible only
 > in the log.
 
 ## Email as username (opt-in, since 1.1)
@@ -66,7 +68,7 @@ governs the login name:
   64 characters, passing Contao's own `extnd` character check (which excludes, among others,
   `# < > ( ) \ =`), and only if no other member already carries that name. If the address does not
   qualify, **saving the email is rejected** ("This address cannot be used as a login name").
-- **Follow rule:** the username **always** follows the current email address – on registration
+- **Always equal to the address:** the username **always** follows the current email address – on registration
   (overwriting an already pre-filled name too), in the self-service profile, on a back end edit,
   and after a confirmed email change. An already different username is corrected the next time
   the member is saved; the one exception is a still **unconfirmed** email change - there the
@@ -156,7 +158,7 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   pre-fetching links triggers nothing); only a `POST` with Contao's usual form token actually
   performs the change – under a row lock (`SELECT ... FOR UPDATE`) and a transaction, re-checking
   the hash, expiry, and whether the address to be restored meanwhile belongs to someone else. On
-  success: the old address is restored, the username is carried back via the same follow rule as
+  success: the old address is restored, the username is aligned with the restored address as
   above, the password is invalidated (the `login` field is never touched – that stays the
   operator's call), every unconfirmed opt-in token of the member is deleted, and a currently
   logged-in session of that same member is logged out. If the username cannot follow the restored

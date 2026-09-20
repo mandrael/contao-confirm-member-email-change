@@ -40,8 +40,9 @@ class ConfirmEmailChangeController
     private const PREFIX = 'email';
 
     /**
-     * Core password-reset opt-in prefix (ModuleLostPassword) – revoked per A6 once an
-     * email change is confirmed, so the old address can no longer complete a reset.
+     * Opt-in prefixes revoked once an email change is confirmed, so the old address can no
+     * longer complete a reset: "pw" is the core's password reset (ModuleLostPassword),
+     * "mdacc" the access link of mandrael/contao-member-directory.
      */
     private const REVOKE_ON_CONFIRM_PREFIXES = ['pw', 'mdacc'];
 

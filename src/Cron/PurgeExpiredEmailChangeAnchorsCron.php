@@ -12,7 +12,7 @@ use Psr\Log\LoggerInterface;
  * A8: clears expired security-anchor fields (see EmailChangeAnchorPolicy) so an old
  * address does not sit in tl_member indefinitely once its 14-day window has passed.
  * A used anchor is already cleared synchronously by RevokeEmailChangeController; this
- * only catches the ones nobody ever clicked. One indexed UPDATE, no per-row model
+ * only catches the ones nobody ever clicked. One single UPDATE, no per-row model
  * loop – mirrors the core's own PurgeOptInTokensCron.
  */
 #[AsCronJob('daily')]

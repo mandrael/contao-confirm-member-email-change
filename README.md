@@ -24,8 +24,9 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
 ## So funktioniert es
 
 1. Mitglied ändert im Profil seine E-Mail-Adresse.
-2. Ein `fields.email.save`-Callback (hohe Priorität) fängt die Änderung ab, erstellt einen
-   Core-`OptIn`-Token und sendet einen Bestätigungslink an die **neue** Adresse. Die alte
+2. Ein `fields.email.save`-Callback (hohe Priorität) fängt die Änderung ab; nach dem
+   Speichern (`config.onsubmit`) entsteht ein Core-`OptIn`-Token und ein Bestätigungslink geht an
+   die **neue** Adresse. Die alte
    Adresse erhält eine Sicherheits-Benachrichtigung. Im Profil bleibt die **alte** Adresse
    sichtbar (kein Lockout, Login unverändert möglich) – mit einem deutlichen grünen Hinweis,
    dass die Änderung noch bestätigt werden muss.
@@ -41,7 +42,8 @@ composer require mandrael/contao-confirm-member-email-change
 ```
 
 Das Bundle registriert sich über den Contao Manager Plugin automatisch – **keine weitere
-Konfiguration nötig**. Nach dem Klick auf den Bestätigungslink sieht das Mitglied eine kurze
+Konfiguration nötig**. Nach Installation und nach jedem Update `contao:migrate` ausführen (das Paket
+legt Spalten in `tl_member` an). Nach dem Klick auf den Bestätigungslink sieht das Mitglied eine kurze
 Bestätigungsseite. Ist ein E-Mail-Login aktiv (siehe unten), wird es dabei abgemeldet und
 meldet sich anschließend mit der neuen Adresse an.
 
@@ -54,8 +56,7 @@ meldet sich anschließend mit der neuen Adresse an.
 > **Voraussetzung:** Eine wirksame Administrator-E-Mail-Adresse muss gesetzt sein – entweder auf
 > der Root-Seite oder in den globalen Einstellungen. Ohne sie schlägt jeder Versand (Bestätigung,
 > Sicherheits-Benachrichtigung, Widerruf-Link) fehl; das Formular meldet dem Besucher trotzdem
-> denselben Erfolg (sonst ließe sich über die Fehlermeldung erraten, welche Adresse bereits
-> vergeben ist) – ein Fehlschlag ist ausschließlich im Log sichtbar.
+> denselben Erfolg (ein Versandfehler wird nicht nach außen gespiegelt) – ein Fehlschlag ist ausschließlich im Log sichtbar.
 
 ## E-Mail als Benutzername (Opt-in, ab 1.1)
 
@@ -67,7 +68,7 @@ gilt für den Login-Namen ausschließlich diese Regel:
   höchstens 64 Zeichen, Contaos eigener `extnd`-Zeichenprüfung (das schließt u. a. `# < > ( ) \ =` aus)
   und wenn kein anderes Mitglied diesen Namen bereits trägt. Passt die Adresse nicht, wird das
   **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden").
-- **Folgeregel:** Der Benutzername folgt **immer** der aktuellen E-Mail-Adresse – bei der
+- **Immer gleich der Adresse:** Der Benutzername folgt **immer** der aktuellen E-Mail-Adresse – bei der
   Registrierung (auch ein bereits vorbelegter Name wird dabei überschrieben), im
   Self-Service-Profil, bei Backend-Bearbeitung und nach einer bestätigten E-Mail-Änderung. Ein
   bereits abweichender Benutzername wird beim nächsten Speichern des Mitglieds korrigiert;
@@ -164,7 +165,7 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   Formular-Token führt die Änderung durch – unter Zeilensperre (`SELECT … FOR UPDATE`) und
   Transaktion, mit erneuter Prüfung von Hash, Ablauf und ob die wiederherzustellende Adresse
   inzwischen einem anderen Konto gehört. Bei Erfolg: alte Adresse wiederhergestellt, Benutzername
-  nach derselben Folgeregel wie oben zurückgeführt, Kennwort ungültig gemacht (kein login-Feld
+  wie oben an die wiederhergestellte Adresse angeglichen, Kennwort ungültig gemacht (kein login-Feld
   wird angetastet – das bleibt Betreiber-Sache), alle unbestätigten Opt-in-Token des Mitglieds
   gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Kann der Benutzername
   der wiederhergestellten Adresse nicht folgen, weil ihn inzwischen jemand anderes trägt, wird der

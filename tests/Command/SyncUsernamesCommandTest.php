@@ -97,6 +97,14 @@ class SyncUsernamesCommandTest extends ContaoTestCase
     }
 
 
+    public function testANonNumericGroupIsRefusedInsteadOfMatchingNobody(): void
+    {
+        $tester = $this->tester([$this->member(1, 'in@example.com', '', 'a:1:{i:0;i:2;}')]);
+
+        self::assertSame(1, $tester->execute(['--group' => 'abc']));
+        self::assertStringContainsString('--group', $tester->getDisplay());
+    }
+
     /**
      * DeepSeek BL-2: the command is the migration path FOR the opt-in. With the switch
      * off, --force would silently rewrite every login name with no way back.

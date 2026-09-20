@@ -6,8 +6,8 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername;
 
 /**
  * Outcome of UsernamePolicy::evaluate() – also the case classes reported by
- * the member-email:sync-usernames console command (A5), so keep the names
- * stable, they are user-facing there.
+ * the member-email:sync-usernames console command (A5), which maps each
+ * case to the label an operator sees (SyncUsernamesCommand::classify()).
  */
 enum EligibilityReason
 {
