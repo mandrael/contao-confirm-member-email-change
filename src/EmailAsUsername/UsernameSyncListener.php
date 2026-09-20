@@ -29,7 +29,7 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  *   ineligible address does NOT throw – a legacy member has to stay editable.
  *
  * - onSubmitMember() is the config.onsubmit callback and does the WRITING, for both the
- *   back end and, since Runde 2 Befund 4(a), the front-end "personal data" save. It
+ *   back end and also the front-end "personal data" save. It
  *   cannot live in the field callback: DC_Table runs field save callbacks BEFORE the
  *   email uniqueness check (core 5.3 DC_Table.php:3351-3370), so a username written there
  *   would outlive an email change that is rejected a moment later. onsubmit runs after
@@ -38,10 +38,10 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  *   runs AFTER EmailChangeListener::onSubmit() (priority 255 vs. 0, descending), whose
  *   own save_callback already suppressed the write of any pending new address – so
  *   $user->email here is always the address that is really committed at this moment,
- *   never a pending one (Runde 2, Befund 4(a) resolved that way, not by writing early).
+ *   never a pending one (resolved that way, not by writing early).
  *
  * Both write paths go through a single UPDATE conditioned on `id = ? AND email = ?`
- * using the address just read (Runde 2, Befund 3, blockierend): a Model::save() call
+ * using the address just read: a Model::save() call
  * here would write unconditionally and could overwrite a login name set moments earlier
  * by a confirmed or revoked change that raced this very save. Zero affected rows simply
  * means the address changed in between – nothing to do, the next save (or
@@ -133,7 +133,7 @@ final class UsernameSyncListener
         }
 
         if (EligibilityReason::Eligible !== $this->usernamePolicy->evaluate($email, $memberId)) {
-            // Runde 2, Befund 4: the other of the two DELIBERATE exceptions to "username IS
+            // The other of the two DELIBERATE exceptions to "username IS
             // the email" (the other is RevokeEmailChangeController's colliding-restore
             // case). Only reachable for an address that was already stored before the switch
             // went on – onSaveEmail() rejects every CHANGED ineligible address. Saving the
@@ -143,7 +143,7 @@ final class UsernameSyncListener
             return;
         }
 
-        // Review Runde 3 (blockierend): utf8mb4_unicode_ci equates ß=ss, é=e and a
+        // utf8mb4_unicode_ci equates ß=ss, é=e and a
         // trailing space - a byte-exact BINARY comparison is required so a collision in
         // collation-equal but canonically DIFFERENT spellings cannot slip a stale login
         // name past this guard in the race window between the read above and this write.

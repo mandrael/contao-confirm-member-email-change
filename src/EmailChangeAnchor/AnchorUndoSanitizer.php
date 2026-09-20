@@ -9,7 +9,7 @@ use Contao\DataContainer;
 use Doctrine\DBAL\Connection;
 
 /**
- * Review Runde 3 (bekannte Grenze 1): eval.doNotCopy keeps the five anchor fields off
+ * eval.doNotCopy keeps the five anchor fields off
  * a COPIED member, but DC_Table::delete() has no such flag - it snapshots the whole row
  * (including a still-pending plaintext token in emailChangeAnchorPending) into
  * tl_undo.data BEFORE this callback runs, and undo() later re-INSERTs that snapshot

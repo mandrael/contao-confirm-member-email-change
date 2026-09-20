@@ -16,7 +16,7 @@ use Symfony\Component\Security\Http\Event\CheckPassportEvent;
  * A4: lets a member log in with a differently-cased email even though
  * tl_member.username is a case-sensitive (BINARY) column.
  *
- * Runde 2, Befund 5 (DeepSeek BL-1): independent of the memberEmailAsUsername switch (A1)
+ * Independent of the memberEmailAsUsername switch (A1)
  * - a member's login name IS an email address the moment ANY route wrote a lower-cased
  * one (the switch, terminal42/contao-mailusername, or a manually assigned address-shaped
  * name), and the switch being off afterwards must not un-break the case-insensitive login

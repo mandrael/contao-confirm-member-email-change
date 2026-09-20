@@ -112,7 +112,7 @@ class EmailChangeListener
      * successful submit regardless of which fields changed, so the email-only case
      * is covered too.
      *
-     * DeepSeek W-4 (Runde 2): ModulePersonalData calls its onsubmit_callbacks with no
+     * ModulePersonalData calls its onsubmit_callbacks with no
      * try/catch of its own, so a mail failure here (typically: no effective administrator
      * address configured, see Email::send()) would otherwise surface as an uncaught
      * exception – a 500 for a member who just successfully changed their data. Both

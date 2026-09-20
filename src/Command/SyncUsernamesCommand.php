@@ -118,12 +118,12 @@ final class SyncUsernamesCommand extends Command
         };
 
         if ('würde umgestellt' === $label && $force) {
-            // Codex 3 (Runde 2, blockierend): conditional on the address findAll() read
+            // Conditional on the address findAll() read
             // above, same as UsernameSyncListener::onSubmitMember() - not Model::save(),
             // which would write unconditionally and could overwrite a login name a
             // racing confirm/revoke had just set from a different address. Zero affected
             // rows means exactly that happened in the meantime; the next run catches it.
-            // Review Runde 3 (blockierend): same BINARY fix as UsernameSyncListener - see
+            // Same BINARY fix as UsernameSyncListener - see
             // there for why utf8mb4_unicode_ci is not byte-exact.
             $email = (string) $member->email;
             $affected = $this->connection->executeStatement(

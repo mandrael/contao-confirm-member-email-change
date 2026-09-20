@@ -26,7 +26,7 @@ use Psr\Log\LoggerInterface;
  * rendering/saving it either way, but still saves the admin from picking a
  * field that would do nothing.
  *
- * Runde 2, Befund 4(b): overwrites a pre-filled username too, not just an empty one -
+ * Overwrites a pre-filled username too, not just an empty one -
  * "username IS the email" while the switch is on has no exception for a value the
  * registrant (or a legacy module config) happened to submit. In practice this rarely
  * fires: UsernameFieldLockListener already keeps the field from being posted at all.

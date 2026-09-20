@@ -9,7 +9,7 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 ### Behoben
 - `member-email:sync-usernames --group=<wert>` lehnt einen nicht numerischen Wert mit Fehlercode ab.
   Vorher galt er als Gruppe 0, traf kein Mitglied und endete scheinbar erfolgreich.
-- Einstellungstext: Der Schalter „E-Mail als Benutzername" nennt jetzt ausdrücklich, dass er nur
+- Einstellungstext: Der Schalter „E-Mail als Benutzername“ nennt jetzt ausdrücklich, dass er nur
   Mitglieder betrifft, nicht Backend-Benutzer.
 - `composer.json`: direkt benutzte Pakete `psr/log` und `symfony/event-dispatcher` als
   Abhängigkeit eingetragen (kamen bisher nur indirekt über Contao).
@@ -20,10 +20,10 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 ## [1.1.0] - 2026-09-21
 
 ### Hinzugefügt
-- Schalter „E-Mail als Benutzername" (Einstellungen, Standard aus): Der Benutzername ist dann
-  zwingend die kleingeschriebene E-Mail-Adresse – bei Registrierung, „Persönliche Daten",
+- Schalter „E-Mail als Benutzername“ (Einstellungen, Standard aus): Der Benutzername ist dann
+  zwingend die kleingeschriebene E-Mail-Adresse – bei Registrierung, „Persönliche Daten“,
   Backend-Bearbeitung und nach bestätigter Adressänderung. Das Feld ist nirgends mehr editierbar,
-  das Login-Formular zeigt „E-Mail-Adresse". Unzulässige Adressen (über 64 Zeichen, unerlaubte
+  das Login-Formular zeigt „E-Mail-Adresse“. Unzulässige Adressen (über 64 Zeichen, unerlaubte
   Zeichen, Kollision) werden beim Speichern abgelehnt.
 - Befehl `member-email:sync-usernames` (Probelauf als Standard, `--force` schreibt, `--group=<id>`):
   gleicht den Bestand auf einmal ab. Gibt nur Mitglieds-IDs und Fallklassen aus, nie Adressen oder Namen.
@@ -31,7 +31,7 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Widerrufslink: Nach einer bestätigten Adressänderung erhält die alte Adresse einen 14 Tage
   gültigen Link, der die Änderung rückgängig macht, das Kennwort ungültig setzt und offene Links
   entwertet. Scheitert der Versand, wird derselbe Link stündlich erneut gesendet.
-- Eine bestätigte Adressänderung entwertet offene „Kennwort vergessen"-Links des Mitglieds.
+- Eine bestätigte Adressänderung entwertet offene „Kennwort vergessen“-Links des Mitglieds.
 
 ### Geändert
 - Bestätigung und Widerruf laufen in einer Transaktion mit Zeilensperre auf das Mitglied.
@@ -59,9 +59,9 @@ Datenbank-Backup anlegen.
   deren Module an der gerade geänderten Login-Identität scheitern könnten). Behandelt abgelaufene/
   bereits-bestätigte/ungültige Token und prüft die Eindeutigkeit der neuen Adresse zur Confirm-Zeit.
 - Klarer FE-Hinweis im Profilmodul beim Speichern: auffällige hellgrüne Box
-  („✓ Bestätigungslink an … gesendet …" statt des irreführenden „gespeichert").
+  („✓ Bestätigungslink an … gesendet …“ statt des irreführenden „gespeichert“).
 - Ersetzt Contaos generische Unique-Meldung im FE-Profil durch eine E-Mail-spezifische
-  („Diese E-Mail-Adresse existiert bereits." statt „Dieser Eintrag ist bereits vorhanden!");
+  („Diese E-Mail-Adresse existiert bereits.“ statt „Dieser Eintrag ist bereits vorhanden!“);
   das Backend behält die generische Meldung.
 - Kompatibilität mit E-Mail-als-Username-Erweiterungen: Benutzername-Sync beim Bestätigen für
   `terminal42/contao-mailusername` (verbatim, Pflicht) bzw. `heimrichhannot/contao-email2username-bundle`

@@ -214,7 +214,7 @@ class RevokeEmailChangeController
         $newUsername = $this->usernameChangeSync->resolve($oldUsername, (string) $row['email'], $restoredEmail, $memberId);
 
         if (null === $newUsername && $this->usernameChangeSync->rejects($restoredEmail, $memberId)) {
-            // Runde 2, Befund 4: one of the two DELIBERATE exceptions to "username IS the
+            // One of the two DELIBERATE exceptions to "username IS the
             // email" (the other is UsernameSyncListener's unchanged-ineligible-address
             // case). The restored address cannot become the login name again, typically
             // because somebody else took it meanwhile. The revoke is a SECURITY function
@@ -226,7 +226,7 @@ class RevokeEmailChangeController
         // tl_member.username carries a UNIQUE index and is nullable, so it is only ever
         // written with a real value, never blanked back to an empty string.
         // emailChangeAnchorPending is cleared alongside the hash - the plaintext it
-        // stashed for the pending-send window (Runde 2, Befund 2) is spent once consumed.
+        // stashed for the pending-send window is spent once consumed.
         if (null !== $newUsername && '' !== $newUsername && $newUsername !== $oldUsername) {
             $this->connection->executeStatement(
                 'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',

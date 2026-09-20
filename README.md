@@ -61,13 +61,13 @@ meldet sich anschließend mit der neuen Adresse an.
 ## E-Mail als Benutzername (Opt-in, ab 1.1)
 
 Alternative zu einer separaten Erweiterung: In `Einstellungen → E-Mail als Benutzername` lässt
-sich **„E-Mail als Benutzername"** direkt in diesem Bundle einschalten (Standard: aus). Eingeschaltet,
+sich **„E-Mail als Benutzername“** direkt in diesem Bundle einschalten (Standard: aus). Eingeschaltet,
 gilt für den Login-Namen ausschließlich diese Regel:
 
 - **Kanonische Regel:** Login-Name = kleingeschriebene, getrimmte E-Mail-Adresse – zulässig nur bei
   höchstens 64 Zeichen, Contaos eigener `extnd`-Zeichenprüfung (das schließt u. a. `# < > ( ) \ =` aus)
   und wenn kein anderes Mitglied diesen Namen bereits trägt. Passt die Adresse nicht, wird das
-  **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden").
+  **Speichern der E-Mail abgelehnt** („Diese Adresse kann nicht als Login-Name verwendet werden“).
 - **Immer gleich der Adresse:** Der Benutzername folgt **immer** der aktuellen E-Mail-Adresse – bei der
   Registrierung (auch ein bereits vorbelegter Name wird dabei überschrieben), im
   Self-Service-Profil, bei Backend-Bearbeitung und nach einer bestätigten E-Mail-Änderung. Ein
@@ -92,13 +92,13 @@ gilt für den Login-Namen ausschließlich diese Regel:
   `member-email:sync-usernames` (siehe unten), der genau das repariert.
 - **Das Benutzername-Feld selbst ist nicht mehr editierbar:** weder im Backend noch in einem
   Frontend-Modul (Self-Service-Profil, Registrierung) – auch dann nicht, wenn ein Modul
-  „username" noch aus der Zeit vor dem Einschalten als editierbares Feld konfiguriert hat.
-- **Login-Formular:** Zeigt statt „Benutzername" die Beschriftung „E-Mail-Adresse", damit
+  „username“ noch aus der Zeit vor dem Einschalten als editierbares Feld konfiguriert hat.
+- **Login-Formular:** Zeigt statt „Benutzername“ die Beschriftung „E-Mail-Adresse“, damit
   Mitglieder wissen, womit sie sich anmelden (nur die Beschriftung, das Formularfeld heißt
   technisch weiterhin `username`).
 - **Login mit abweichender Schreibweise:** Existiert kein Mitglied mit dem exakt eingegebenen
   Benutzernamen, wird beim Anmelden zusätzlich die kleingeschriebene Variante gesucht (nur an der
-  öffentlichen Website, nur wenn die Eingabe ein „@" enthält) – ein bestehender, anders
+  öffentlichen Website, nur wenn die Eingabe ein „@“ enthält) – ein bestehender, anders
   geschriebener Benutzername wird dabei nie verdeckt. Diese Normalisierung gilt **unabhängig vom
   Schalter**: Sobald irgendein Benutzername wie eine E-Mail-Adresse aussieht (dieser Opt-in, eine
   der Erweiterungen unten oder ein von Hand vergebener Name), soll die Anmeldung bei ihm nicht an
@@ -126,7 +126,7 @@ dasselbe Feld):
 
 | Erweiterung | Verhalten mit diesem Bundle |
 |---|---|
-| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). Ist das Paket installiert, bleibt der eigene Schalter **ohne Wirkung** – er wird zur Laufzeit als „aus" behandelt, und das Einstellungsfeld sagt das auch. Bewusst kein `conflict` in der `composer.json`: der würde bestehende Installationen des veröffentlichten Pakets vom Update aussperren. |
+| [**terminal42/contao-mailusername**](https://github.com/terminal42/contao-mailusername) | Reiner Sync `username = email`. Beim Bestätigen wird der Benutzername **verbatim** mitgezogen (sonst bräche der Login mit der neuen Adresse). Ist das Paket installiert, bleibt der eigene Schalter **ohne Wirkung** – er wird zur Laufzeit als „aus“ behandelt, und das Einstellungsfeld sagt das auch. Bewusst kein `conflict` in der `composer.json`: der würde bestehende Installationen des veröffentlichten Pakets vom Update aussperren. |
 | heimrichhannot/contao-email2username-bundle | **Nicht Contao-5-tauglich:** Version 1.4.0 nutzt den in Contao 5 entfernten `importUser`-Hook und wird daher nicht mehr unterstützt. |
 
 Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt

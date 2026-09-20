@@ -127,7 +127,7 @@ class ConfirmEmailChangeController
      * row lock, so taking one here too would create the opposite lock order.
      *
      * The member/token relation itself is re-verified from the freshly locked tl_opt_in
-     * row too (Runde 2, Hinweis) – $memberId is still the one read before the lock, only
+     * row too – $memberId is still the one read before the lock, only
      * used to acquire it, never trusted for the write below without this re-check.
      *
      * @return array{page: string|null, error: bool, oldEmail: string, revokeToken: string|null, usernameChanged: bool}
@@ -171,10 +171,10 @@ class ConfirmEmailChangeController
             return $fail('expired', true);
         }
 
-        // Review Runde 3 (blockierend): tl_opt_in has no "relatedRecords" column - the
+        // tl_opt_in has no "relatedRecords" column - the
         // relation lives in the CHILD table tl_opt_in_related (pid/relTable/relId), the
         // same way core OptInModel::getRelatedRecords() reads it (core 5.3/5.7
-        // OptInModel.php). Runde 2, Hinweis (Codex): $memberId above came from
+        // OptInModel.php). $memberId above came from
         // $optInToken->getRelatedRecords(), read BEFORE the lock - re-verified here from
         // the SAME locked tl_opt_in row the checks above just read, so the relation this
         // confirmation acts on is fresh, not trusted from before the lock was acquired.
@@ -259,7 +259,7 @@ class ConfirmEmailChangeController
 
             // emailChangeAnchorNotified stays 0 until the link really went out, see
             // AnchorNotice and ResendEmailChangeAnchorNoticeCron. emailChangeAnchorPending
-            // carries the plaintext for exactly that pending window (Runde 2, Befund 2) -
+            // carries the plaintext for exactly that pending window -
             // writing it here also naturally replaces whatever an earlier, since-expired
             // anchor may have left behind.
             $this->connection->executeStatement(

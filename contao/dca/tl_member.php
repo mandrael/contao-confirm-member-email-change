@@ -9,12 +9,12 @@ declare(strict_types=1);
  * because the schema provider reads every field's 'sql' key regardless of inputType.
  */
 
-// Codex Runde 2, Befund 1 (blockierend): DC_Table::copy() copies every field verbatim
+// DC_Table::copy() copies every field verbatim
 // unless it carries eval.doNotCopy - without it, copying a member would copy a still
 // valid revoke anchor too, and both rows would answer to the same link. All five anchor
 // fields below reset to their SQL default on copy.
 //
-// Review Runde 3 (blockierend, DSH+Codex): the same five fields carry a plaintext token
+// The same five fields carry a plaintext token
 // (emailChangeAnchorPending) while a send is pending, so they must neither be versioned
 // nor shown. versionize=false keeps Versions::create() from serializing them into
 // tl_version (core 5.3/5.7 Versions.php, ~line 180 in both versions); doNotShow keeps them
@@ -44,7 +44,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = $anchorE
 
 // 1 once the revoke link really left the house. While this stays 0,
 // ResendEmailChangeAnchorNoticeCron re-sends the SAME link stored in
-// emailChangeAnchorPending rather than issuing a new one (Runde 2, Befund 2): rotating
+// emailChangeAnchorPending rather than issuing a new one Rotating
 // the anchor on every retry could invalidate a link that already reached the mailbox.
 $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = $anchorEval + [
     'sql' => 'int unsigned NOT NULL default 0',

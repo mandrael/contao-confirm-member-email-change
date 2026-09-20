@@ -20,8 +20,8 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * send is pending, in emailChangeAnchorPending (see the DCA comment). A send that fails
  * after the change was committed would otherwise leave the member with an anchor they
  * can never use. Leaving emailChangeAnchorNotified at 0 hands the case to
- * ResendEmailChangeAnchorNoticeCron, which re-sends the SAME stashed link - Runde 2,
- * Befund 2: rotating it on every retry could invalidate a link that already arrived.
+ * ResendEmailChangeAnchorNoticeCron, which re-sends the SAME stashed link:
+ * rotating it on every retry could invalidate a link that already arrived.
  *
  * Used by ConfirmEmailChangeController (right after its commit) and by that cron.
  */

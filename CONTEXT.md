@@ -32,15 +32,15 @@ Das ist ein Sicherheitsthema:
 ## 3. Recherche-Ergebnis (belegt)
 
 - **Kein gepflegtes Plugin** löst das für Contao 4/5 (Packagist-Such-API + Kandidaten
-  geprüft). `heimrichhannot/contao-confirmed_email` = nur „E-Mail zweimal eintippen"
+  geprüft). `heimrichhannot/contao-confirmed_email` = nur „E-Mail zweimal eintippen“
   (Tippfehler-Schutz), **Contao 3, tot seit 2016** — irrelevant.
-- **Bekannte Core-Lücke:** Issue **contao/contao#258 „Confirm e-mail address changes"**,
+- **Bekannte Core-Lücke:** Issue **contao/contao#258 „Confirm e-mail address changes“**,
   2016 von **leofeyer** (Contao-Gründer) gestellt, *closed/completed* — aber **nur der
   OptIn-Service** (#196) wurde gebaut, **der Konsument im Profilmodul nie fertiggestellt**.
   leofeyers Plan war: generischer OptIn-Service für beliebige Tabellen/Felder → genutzt
   von personalData + newsletter. Genau diesen fehlenden Konsumenten bauen wir.
 - Entscheidung: **eigenes, member-spezifisches Bundle** — kein PR an terminal42
-  (dessen Scope = „E-Mail *ist* Username", orthogonal), nicht generisch/table-agnostisch
+  (dessen Scope = „E-Mail *ist* Username“, orthogonal), nicht generisch/table-agnostisch
   (YAGNI). Später Upstream in den Core wäre denkbar (größerer Brocken: + Newsletter, BC, Tests).
 
 ## 4. Verifizierte technische Fakten (mit Fundstellen, Prod 5.3.47)
@@ -72,7 +72,7 @@ Pfad: `/home/nkinstitute/web/nkinstitute.at/public_html/vendor/contao/core-bundl
   `utf8mb4_unicode_ci` (Login case-insensitiv), relabelt Label username→E-Mail.
 - **Folge für uns:** Unser `fields.email.save`-Callback gibt den **ALTEN** Wert zurück
   (E-Mail ändert sich bis Bestätigung nicht) → terminal42 synct keine neue Mail vorzeitig,
-  Login bleibt mit alter Adresse intakt (kein Lockout während „pending").
+  Login bleibt mit alter Adresse intakt (kein Lockout während „pending“).
 - **Aber:** Beim Bestätigungs-Schreiben schreiben wir **programmatisch** → DCA-`save_callback`
   feuern dann **nicht** → terminal42 synct den `username` **nicht** automatisch. → siehe §6 B4.
 
@@ -101,11 +101,11 @@ Damit sind alle Produktfragen geklärt. Einziger im Plan zu verifizierender Tech
 ## 7. Edge-Cases-Checkliste (im Plan abdecken)
 
 1. Eindeutigkeit der **neuen** E-Mail prüfen (kein Token auf fremde/schon-vergebene Adresse).
-2. Token-Ablauf (24 h) + **Pending-UX** (Profil zeigt alte Mail + „Bestätigung an NEU@… gesendet").
+2. Token-Ablauf (24 h) + **Pending-UX** (Profil zeigt alte Mail + „Bestätigung an NEU@… gesendet“).
 3. Alte Adresse benachrichtigen (B5).
 4. terminal42-`username`-Sync beim Bestätigungs-Write (B4).
 5. Nur **Änderungs**-Fall; Registrierung/Backend/Import unangetastet (B6).
-6. Login während „pending" bleibt mit alter Adresse möglich (kein Lockout) — sicherstellen.
+6. Login während „pending“ bleibt mit alter Adresse möglich (kein Lockout) — sicherstellen.
 
 ## 8. Entscheidungen (locked)
 

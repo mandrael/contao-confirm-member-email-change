@@ -11,7 +11,7 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice
 /**
  * A8: catches the anchors whose notification mail never made it out (see AnchorNotice).
  *
- * Runde 2, Befund 2: this used to rotate the anchor on every retry, which could
+ * This used to rotate the anchor on every retry, which could
  * invalidate a link that had already reached the mailbox (two overlapping runs, or a
  * crash between issuing the new hash and marking the old one notified). It now NEVER
  * rotates a valid anchor - it re-sends the exact same plaintext link stashed in
