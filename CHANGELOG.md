@@ -4,135 +4,35 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [1.1.0] - Unveröffentlicht
+## [1.1.0] - 2026-09-21
 
 ### Hinzugefügt
-- Opt-in „E-Mail als Benutzername" (`tl_settings.memberEmailAsUsername`, Standard aus): Login-Name
-  = kleingeschriebene, getrimmte E-Mail-Adresse, zulässig nur bei höchstens 64 Zeichen, Contaos
-  `extnd`-Zeichenprüfung und ohne Kollision mit einem anderen Mitglied; sonst wird das Speichern der
-  E-Mail abgelehnt. Der Benutzername folgt **immer** der aktuellen Adresse – bei Registrierung, im
-  Self-Service-Profil, bei Backend-Bearbeitung und nach bestätigter E-Mail-Änderung; ein bereits
-  abweichender Benutzername wird beim nächsten Speichern korrigiert (Ausnahme: eine noch
-  unbestätigte E-Mail-Änderung – dort bleibt er bis zur Bestätigung an der alten Adresse). Das
-  Benutzername-Feld ist dabei weder im Backend noch in einem Frontend-Modul editierbar, auch nicht
-  bei einem Modul, das „username" noch aus der Zeit vor dem Einschalten als editierbares Feld
-  konfiguriert hat. Das Login-Formular zeigt statt „Benutzername" die Beschriftung
-  „E-Mail-Adresse" (nur die Beschriftung, das Formularfeld heißt technisch weiterhin `username`).
-- Login-Listener auf `CheckPassportEvent` (nur Frontend-Firewall, nur mit „@" in der Eingabe):
-  sucht bei fehlendem exaktem Treffer zusätzlich die kleingeschriebene Variante, ohne einen
-  bestehenden, anders geschriebenen Benutzernamen zu verdecken.
-- Konsolenbefehl `member-email:sync-usernames` (Probelauf als Standard, `--force` zum Schreiben,
-  `--group=<id>` zur Eingrenzung): gleicht den gesamten Mitgliederbestand auf einmal ab, statt auf
-  das nächste Speichern jedes einzelnen Mitglieds zu warten. Gibt ausschließlich Mitglieds-IDs und
-  Fallklassen aus, nie E-Mail-Adressen oder Namen.
-- Widerruft beim bestätigten E-Mail-Wechsel offene Core-Kennwort-Token (Präfix `pw`) des Mitglieds,
-  damit ein alter Kennwort-Link nicht mehr auf die neue Adresse zielt.
-- Neues `tl_settings`-Feld samt Palette und deutscher/englischer Sprachdatei.
-- **Sicherheitsanker:** Eine bestätigte E-Mail-Änderung legt an `tl_member` einen Widerrufs-Anker
-  an (SHA-256-Hash des Tokens, alte Adresse, Ablaufzeit; neue SQL-only-Felder
-  `emailChangeAnchorHash`/`emailChangeAnchorEmail`/`emailChangeAnchorExpires`/
-  `emailChangeAnchorNotified`/`emailChangeAnchorPending`, alle mit `doNotCopy`, kein Backend-Feld)
-  und schickt der alten Adresse eine zweite Mail mit einem 14 Tage gültigen Widerrufslink.
-  Ketten-Regel: Existiert bereits ein gültiger Anker, bleibt er beim nächsten bestätigten Wechsel
-  unverändert (der älteste gewinnt); die alte Adresse dieses zweiten Wechsels bekommt die
-  Benachrichtigung dann ohne Link. Einlösen über eine neue Route (`GET` zeigt nur ein
-  Bestätigungsformular, `POST` mit Contaos Formular-Token führt unter Zeilensperre und
-  Transaktion aus): stellt die alte Adresse wieder her (sofern nicht inzwischen anderweitig
-  vergeben), führt den Benutzernamen nach der bestehenden Folgeregel zurück, macht das Kennwort
-  über einen für alle Passwort-Hasher unverifizierbaren Wert ungültig (ohne `login` anzutasten),
-  löscht alle unbestätigten Opt-in-Token des Mitglieds und meldet eine laufende Sitzung ab. Jeder
-  Fehlschlag zeigt dieselbe allgemeine Meldung. Ein täglicher Cron räumt abgelaufene Anker auf.
+- Schalter „E-Mail als Benutzername" (Einstellungen, Standard aus): Der Benutzername ist dann
+  zwingend die kleingeschriebene E-Mail-Adresse – bei Registrierung, „Persönliche Daten",
+  Backend-Bearbeitung und nach bestätigter Adressänderung. Das Feld ist nirgends mehr editierbar,
+  das Login-Formular zeigt „E-Mail-Adresse". Unzulässige Adressen (über 64 Zeichen, unerlaubte
+  Zeichen, Kollision) werden beim Speichern abgelehnt.
+- Befehl `member-email:sync-usernames` (Probelauf als Standard, `--force` schreibt, `--group=<id>`):
+  gleicht den Bestand auf einmal ab. Gibt nur Mitglieds-IDs aus.
+- Anmeldung mit abweichender Groß-/Kleinschreibung der E-Mail, unabhängig vom Schalter.
+- Widerrufslink: Nach einer bestätigten Adressänderung erhält die alte Adresse einen 14 Tage
+  gültigen Link, der die Änderung rückgängig macht, das Kennwort ungültig setzt und offene Links
+  entwertet. Scheitert der Versand, wird derselbe Link stündlich erneut gesendet.
+- Eine bestätigte Adressänderung entwertet offene „Kennwort vergessen"-Links des Mitglieds.
 
 ### Geändert
-- `terminal42/contao-mailusername` bleibt als Rückfall unterstützt, solange der eingebaute Opt-in
-  ausgeschaltet ist. `heimrichhannot/contao-email2username-bundle` wird nicht mehr unterstützt (nutzt
-  den in Contao 5 entfernten `importUser`-Hook und funktioniert dort nicht).
-- Ist `terminal42/contao-mailusername` installiert, liefert der eigene Schalter zur Laufzeit immer
-  „aus" und das Einstellungsfeld weist darauf hin. Bewusst kein `conflict` in der `composer.json`:
-  der würde bestehende Installationen des veröffentlichten Pakets vom Update aussperren.
+- Bestätigung und Widerruf laufen in einer Transaktion mit Zeilensperre auf das Mitglied.
+- Die Bestätigungsseite sendet `Cache-Control: private, no-store` und `X-Robots-Tag: noindex`.
+- Ist `terminal42/contao-mailusername` installiert, bleibt der eigene Schalter wirkungslos und die
+  Einstellung weist darauf hin. `heimrichhannot/contao-email2username-bundle` wird nicht mehr
+  unterstützt (läuft unter Contao 5 nicht).
 
 ### Behoben
-- **Der Benutzername wurde in Backend und Registrierung tatsächlich nie geschrieben.** Beide Wege
-  nutzten `Model::setRow([...])->save()`; `setRow()` ersetzt die ganze Zeile und markiert nichts als
-  geändert, `save()` schrieb deshalb nichts und das Modell verlor im laufenden Request seine ID
-  (Core 5.3 `Model.php:376-393,547-568`). Jetzt wird die Eigenschaft gesetzt und gespeichert. Im
-  Backend wandert der Schreibvorgang zusätzlich aus dem Feld-Callback in `config.onsubmit`: der
-  Feld-Callback läuft in `DC_Table` **vor** der Eindeutigkeitsprüfung der E-Mail, ein dort
-  geschriebener Benutzername hätte eine anschließend abgelehnte Adresse überlebt. Er prüft weiter,
-  er schreibt nur nicht mehr.
-- „Benutzername = E-Mail" gilt jetzt lückenlos: Eine unzulässige Adresse wird in der Registrierung
-  abgewiesen, bevor das Mitglied entsteht, im Frontend schon beim Anfordern der Änderung, und eine
-  erst nachträglich unzulässig gewordene Adresse wird nicht bestätigt (der Link bleibt unverbraucht
-  und läuft ab). Eine unveränderte unzulässige Bestandsadresse blockiert das Speichern dagegen
-  nicht mehr, sondern hinterlässt nur einen Log-Eintrag mit der Mitglieds-ID. Der Vergleich „schon
-  synchron" prüft exakt gegen die kanonische Form statt `strcasecmp`, sonst galt
-  „Anna@example.com" fälschlich als synchron.
-- `member-email:sync-usernames --force` bricht bei ausgeschaltetem Schalter mit Fehlercode ab; der
-  Probelauf bleibt immer erlaubt.
-- **Bestätigung und Widerruf laufen jetzt nach demselben Sperrprotokoll:** Transaktion,
-  Zeilensperre auf das Mitglied, danach Mitglied, Link-Datensatz und Anker frisch und sperrend
-  nachlesen, dann Link-Verbrauch, Adresse, Benutzername, Anker und Token-Aufräumen gemeinsam
-  festschreiben. Vorher hatte die Bestätigung weder Transaktion noch Sperre, sodass ein
-  erfolgreicher Widerruf nachträglich überschrieben werden konnte. Der Widerruf sperrt nun über die
-  Mitglieds-ID statt über die nicht indizierte Anker-Spalte.
-- Schlägt der Versand des Widerrufslinks fehl, geht er nicht mehr verloren: Die neue Spalte
-  `tl_member.emailChangeAnchorNotified` wird erst nach erfolgreichem Versand gesetzt, und ein
-  stündlicher Cron sendet für gültige, unbenachrichtigte Anker denselben Link erneut.
-- Technische Fehler im Widerruf enden in derselben allgemeinen Antwort statt in einer Fehlerseite;
-  zurückgerollt wird nur bei aktiver Transaktion, und ein Fehler nach dem Commit stellt den Erfolg
-  nicht mehr als Fehlschlag dar.
-- Die Bestätigungsseite sendet `Cache-Control: private, no-store` und `X-Robots-Tag: noindex`; der
-  Erfolgstext des Widerrufs nennt jetzt den Weg zu einem neuen Kennwort.
+- Fehlt die Administrator-E-Mail, führte das Anfordern einer Adressänderung zur Fehlerseite.
 
-### Behoben (Review Runde 2, 19.09.2026)
-- **Kopieren eines Mitglieds kopierte dessen gültigen Sicherheitsanker.** Alle fünf
-  Anker-Felder tragen jetzt `eval.doNotCopy`; DC_Table::copy() setzt sie auf ihren SQL-Standard
-  zurück, statt sie auf die Kopie zu übertragen.
-- **Der Versand-Cron konnte einen bereits zugestellten Widerrufslink entwerten.** Er rotiert den
-  Anker nicht mehr. Solange der Versand aussteht, liegt der Klartext in der neuen SQL-only-Spalte
-  `tl_member.emailChangeAnchorPending`; der Cron sendet daraus denselben Link erneut, ein doppelter
-  Versand ist unschädlich. Die Spalte wird beim erfolgreichen Versand, beim Widerruf und beim
-  Ablauf (täglicher Purge-Cron) geleert.
-- **Backend-Abgleich und Konsolenbefehl konnten einen veralteten Benutzernamen zurückschreiben.**
-  `UsernameSyncListener::onSubmitMember()` und `member-email:sync-usernames --force` schreiben
-  jetzt über ein bedingtes `UPDATE ... WHERE id = ? AND email = ?` (die gelesene Adresse), statt
-  über ein unbedingtes `Model::save()`; hat sich die Adresse zwischenzeitlich geändert, bleibt der
-  Schreibzugriff wirkungslos statt einen veralteten Namen zu setzen.
-- **Zwei vermeidbare Ausnahmen von „Benutzername = E-Mail" entfernt:** Speichern über
-  „Persönliche Daten" gleicht jetzt auch einen abweichenden Benutzernamen an die gespeicherte
-  Adresse an, selbst während eine Änderung auf Bestätigung wartet; die Registrierung überschreibt
-  jetzt auch einen bereits vorbelegten Benutzernamen.
-- **Login-Normalisierung bei abweichender Schreibweise wirkt jetzt unabhängig vom Schalter**
-  „E-Mail als Benutzername" – vorher griff sie nur bei eingeschaltetem Schalter.
-- **Anfordern der Adressänderung über „Persönliche Daten" konnte bei fehlender
-  Administrator-E-Mail zur Fehlerseite führen**, weil `ModulePersonalData` seine
-  `onsubmit`-Callbacks ohne eigenen Fang aufruft. Bestätigungs- und Hinweis-Mail laufen jetzt in
-  je einem eigenen `try`/`catch`; ein Fehlschlag wird geloggt, ohne den Ablauf abzubrechen.
-- Die Zuordnung Bestätigungslink → Mitglied wird beim Bestätigen jetzt zusätzlich aus der frisch
-  gesperrten `tl_opt_in`-Zeile geprüft, statt nur aus dem vor der Sperre gelesenen Wert.
-
-### Behoben (Review Runde 3, 19.09.2026)
-- **Jede Bestätigung schlug fehl.** Die Nachbesserung aus Runde 2 fragte eine Spalte
-  `tl_opt_in.relatedRecords` ab, die es nicht gibt – die Beziehung liegt in der Kindtabelle
-  `tl_opt_in_related` (`pid`/`relTable`/`relId`). MariaDB brach die Abfrage mit einem Fehler ab, der
-  gefangen und als „ungültiger Link" angezeigt wurde; kein einziger gültiger Bestätigungslink kam
-  mehr durch. Die Prüfung liest jetzt `id` aus der gesperrten `tl_opt_in`-Zeile und fragt
-  `tl_opt_in_related` in derselben Transaktion ab, genau wie Contaos eigenes
-  `OptInModel::getRelatedRecords()`. Ein dauerhafter Test führt jede rohe SQL-Anweisung des Pakets
-  gegen eine aus den echten Spaltenlisten gebaute SQLite-Tabelle aus.
-- **Der Klartext-Widerrufstoken konnte in Versionierung, Detailansicht und Papierkorb landen.** Die
-  fünf Anker-Felder tragen jetzt zusätzlich `eval.versionize = false` und `eval.doNotShow = true`
-  (verhindert Aufnahme in `tl_version` bzw. Anzeige in `DC_Table::show()`). Für den Papierkorb (der
-  eigene Weg über `tl_undo`, den keine der beiden Optionen abdeckt) entfernt ein neuer
-  `config.ondelete_callback` die fünf Felder aus dem soeben geschriebenen `tl_undo`-Datensatz – ein
-  wiederhergestelltes Mitglied kommt ohne Anker zurück, genau wie eine Kopie.
-- **Das bedingte Benutzernamen-Update verglich die E-Mail-Adresse nicht bytegenau.** Sowohl der
-  Hintergrund-Abgleich (`UsernameSyncListener`) als auch `member-email:sync-usernames --force`
-  vergleichen jetzt über `BINARY email = ?` statt der Standard-Kollation, die z. B. „ß" und „ss"
-  oder einen abschließenden Leerraum gleichsetzt.
-- Log-Text bei fehlgeschlagenem Widerrufslink-Versand korrigiert: „derselbe Link wird erneut
-  gesendet" statt des überholten „ein neuer Link wird ausgestellt" (der Cron rotiert den Anker seit
-  Runde 2 nicht mehr).
+### Update
+`contao:migrate` ausführen (fünf neue Spalten in `tl_member`). Vor `--force` ein
+Datenbank-Backup anlegen.
 
 ## [1.0.0] - 2026-09-18
 
