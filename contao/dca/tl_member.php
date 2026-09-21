@@ -44,7 +44,7 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorExpires'] = $anchorE
 
 // 1 once the revoke link really left the house. While this stays 0,
 // ResendEmailChangeAnchorNoticeCron re-sends the SAME link stored in
-// emailChangeAnchorPending rather than issuing a new one Rotating
+// emailChangeAnchorPending rather than issuing a new one. Rotating
 // the anchor on every retry could invalidate a link that already reached the mailbox.
 $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorNotified'] = $anchorEval + [
     'sql' => 'int unsigned NOT NULL default 0',

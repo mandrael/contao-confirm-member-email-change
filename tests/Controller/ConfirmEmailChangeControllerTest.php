@@ -7,6 +7,7 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\Controller;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\Email;
+use Contao\FrontendUser;
 use Contao\TestCase\ContaoTestCase;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\ConfirmEmailChangeController;
@@ -289,6 +290,74 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
     }
 
     /**
+     * The mailed revoke link may be opened in a browser where somebody ELSE is signed
+     * in - that session is none of this request's business, so it must not be logged
+     * out just because SOME member's username changed.
+     */
+    public function testDoesNotLogOutAFrontendUserThatIsNotTheConfirmedMember(): void
+    {
+        $security = $this->createMock(Security::class);
+        $security->method('getUser')->willReturn($this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 99]));
+        $security->expects(self::never())->method('logout');
+
+        $response = $this->invokeController(
+            $this->connection(),
+            usernameChangeSync: $this->usernameChangeSync(true, EligibilityReason::Eligible),
+            security: $security,
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * The confirmed member (ID 7, the default fixture) IS signed in -> logged out
+     * exactly once, without CSRF validation (the request carries an opt-in token, not
+     * a CSRF-protected logout form).
+     */
+    public function testLogsOutTheConfirmedFrontendUser(): void
+    {
+        $security = $this->createMock(Security::class);
+        $security->method('getUser')->willReturn($this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 7]));
+        $security->expects(self::once())->method('logout')->with(false)->willReturn(new Response());
+
+        $response = $this->invokeController(
+            $this->connection(),
+            usernameChangeSync: $this->usernameChangeSync(true, EligibilityReason::Eligible),
+            security: $security,
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * Own try block in afterCommit(): a failed anchor notice must never skip the
+     * logout that a changed username requires.
+     */
+    public function testTheLogoutStillHappensWhenTheAnchorNoticeFails(): void
+    {
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->method('send')->willThrowException(new \RuntimeException('smtp down'));
+
+        $security = $this->createMock(Security::class);
+        $security->method('getUser')->willReturn($this->createClassWithPropertiesMock(FrontendUser::class, ['id' => 7]));
+        $security->expects(self::once())->method('logout')->with(false)->willReturn(new Response());
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error');
+
+        $response = $this->invokeController(
+            $this->connection(),
+            anchorNotice: $anchorNotice,
+            usernameChangeSync: $this->usernameChangeSync(true, EligibilityReason::Eligible),
+            security: $security,
+            logger: $logger,
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.success', (string) $response->getContent());
+    }
+
+    /**
      * DeepSeek H2: the URL carries the token, so the page must not be cached or indexed.
      */
     public function testTheConfirmationPageIsNeitherCachedNorIndexed(): void
@@ -359,6 +428,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         OptInTokenInterface|null $optInToken = null,
         UsernameChangeSync|null $usernameChangeSync = null,
         LoggerInterface|null $logger = null,
+        Security|null $security = null,
     ): Response {
         $email ??= $this->createPartialMock(Email::class, ['sendTo']);
 
@@ -378,7 +448,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
             $optIn,
             $translator,
             $requestStack,
-            $this->createStub(Security::class),
+            $security ?? $this->createStub(Security::class),
             $usernameChangeSync ?? $this->usernameChangeSync(),
             $tokenPurger ?? $this->createStub(UnconfirmedTokenPurger::class),
             $connection,

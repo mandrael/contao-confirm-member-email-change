@@ -41,7 +41,25 @@ final class RawSqlAgainstSchemaTest extends TestCase
             'emailChangeAnchorNotified', 'emailChangeAnchorPending',
         ],
         'tl_undo' => ['id', 'pid', 'tstamp', 'fromTable', 'query', 'affectedRows', 'data'],
+        // AnchorNotice::applySender() root-page administrator-address fallback.
+        'tl_page' => ['id', 'type', 'adminEmail', 'sorting'],
     ];
+
+    /**
+     * Runde-4 addition: AnchorNotice::applySender() reads tl_page.adminEmail when
+     * neither the page context nor the global setting has an address. Before "tl_page"
+     * was added to SCHEMA above, the extractor's own table regex did not match that
+     * statement at all - it silently went unchecked rather than failing loudly. This
+     * pins the extractor actually picking it up, not just the schema tolerating it.
+     */
+    public function testTheRootPageFallbackQueryIsCoveredByTheExtractor(): void
+    {
+        $statements = $this->collectStatements();
+        $pageStatements = array_filter($statements, static fn (string $sql): bool => str_contains($sql, 'tl_page'));
+
+        self::assertCount(1, $pageStatements, 'exactly one raw SQL statement should touch tl_page');
+        self::assertStringContainsString('adminEmail', reset($pageStatements));
+    }
 
     public function testEveryRawSqlStatementMatchesTheSchema(): void
     {

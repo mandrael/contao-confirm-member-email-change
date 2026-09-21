@@ -41,4 +41,21 @@ class TlMemberAnchorFieldsTest extends TestCase
             \sprintf('tl_member.%s must carry eval.doNotCopy so DC_Table::copy() resets it to the SQL default', $field),
         );
     }
+
+    /**
+     * The same five fields carry a plaintext token while a send is pending, so they
+     * must neither be versioned (Versions::create() would serialize the plaintext into
+     * tl_version) nor shown (DC_Table::show()'s detail view).
+     */
+    #[DataProvider('anchorFieldsProvider')]
+    public function testAnchorFieldIsNeitherVersionizedNorShown(string $field): void
+    {
+        $GLOBALS['TL_DCA'] = [];
+        require __DIR__.'/../../contao/dca/tl_member.php';
+
+        $eval = $GLOBALS['TL_DCA']['tl_member']['fields'][$field]['eval'] ?? [];
+
+        self::assertSame(false, $eval['versionize'] ?? null, \sprintf('tl_member.%s must carry eval.versionize === false', $field));
+        self::assertSame(true, $eval['doNotShow'] ?? null, \sprintf('tl_member.%s must carry eval.doNotShow === true', $field));
+    }
 }

@@ -81,6 +81,19 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
         self::assertSame('member@example.com', $this->identifier($event));
     }
 
+    /**
+     * Same rule the stored login name follows (CanonicalUsername): an IDN domain
+     * normalizes to punycode, not just lowercase.
+     */
+    public function testNormalizesAUnicodeDomainToPunycode(): void
+    {
+        $event = $this->event('Anna@MÜLLER.example', frontend: true);
+
+        $this->listener(exactMatchExists: false)->__invoke($event);
+
+        self::assertSame('anna@xn--mller-kva.example', $this->identifier($event));
+    }
+
     private function listener(bool $exactMatchExists = false): EmailAsUsernameLoginListener
     {
         $scopeMatcher = $this->createMock(ScopeMatcher::class);

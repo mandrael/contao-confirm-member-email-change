@@ -296,11 +296,16 @@ class ConfirmEmailChangeController
             } else {
                 $this->notifyChainedAnchor($outcome['oldEmail']);
             }
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Notice to the old address after a confirmed email change for member ID %d failed with %s; the change itself is applied.', $memberId, $e::class));
+        }
 
+        // Own try block: a failed notice above must never skip the logout.
+        try {
             // When the login identifier changed, the member's current session points at
             // a username that no longer exists → log them out.
             if ($outcome['usernameChanged']) {
-                $this->carryOverLogoutCookies($this->logoutFrontendUser(), $response);
+                $this->carryOverLogoutCookies($this->logoutFrontendUser($memberId), $response);
             }
         } catch (\Throwable $e) {
             $this->logger?->error(\sprintf('Follow-up work after a confirmed email change for member ID %d failed with %s; the change itself is applied.', $memberId, $e::class));
@@ -316,19 +321,22 @@ class ConfirmEmailChangeController
     private function notifyChainedAnchor(string $oldEmail): void
     {
         $email = $this->framework->createInstance(Email::class);
-        $email->from = $GLOBALS['TL_ADMIN_EMAIL'] ?? null;
-        $email->fromName = $GLOBALS['TL_ADMIN_NAME'] ?? null;
+        $this->anchorNotice->applySender($email);
         $email->subject = $this->trans('confirmEmailChange.revokeNoticeSubject');
         $email->text = $this->trans('confirmEmailChange.revokeNoticeChainedText');
         $email->sendTo($oldEmail);
     }
 
-    private function logoutFrontendUser(): ?Response
+    private function logoutFrontendUser(int $memberId): ?Response
     {
         // The identifier changed → log the current member out via the security
         // helper so they re-authenticate with the new address. A stale session token
         // would otherwise reference a username that no longer exists.
-        if ($this->security->getUser() instanceof FrontendUser) {
+        // Only the confirmed member: the mailed link may be opened in a browser where
+        // somebody else is signed in, and that session is none of this request's business.
+        $user = $this->security->getUser();
+
+        if ($user instanceof FrontendUser && (int) $user->id === $memberId) {
             return $this->security->logout(false);
         }
 

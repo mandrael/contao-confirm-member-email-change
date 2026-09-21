@@ -179,7 +179,11 @@ class EmailChangeListener
         // Only for the personal-data module submit (FORM_SUBMIT = "tl_member_<id>").
         // Other frontend forms with a unique field – notably registration with a
         // duplicate username ("tl_registration_<id>") – must keep the generic message.
-        if (!str_starts_with((string) $request->request->get('FORM_SUBMIT'), 'tl_member_')) {
+        // all() instead of get(): InputBag::get() throws on a non-scalar value, and this hook
+        // runs on every front end request - a posted FORM_SUBMIT[] must not turn into a 400.
+        $formSubmit = $request->request->all()['FORM_SUBMIT'] ?? null;
+
+        if (!\is_string($formSubmit) || !str_starts_with($formSubmit, 'tl_member_')) {
             return;
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Security;
 
 use Contao\CoreBundle\Framework\ContaoFramework;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\CanonicalUsername;
 use Contao\CoreBundle\Routing\ScopeMatcher;
 use Contao\FrontendUser;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
@@ -74,10 +75,11 @@ final class EmailAsUsernameLoginListener
             return;
         }
 
-        $lower = mb_strtolower($identifier);
+        // Same rule the stored login name follows: lowercased, IDN domain as punycode.
+        $lower = CanonicalUsername::normalize($identifier);
 
         if ($lower === $identifier) {
-            return; // Already lowercase – the exact search below would find the same thing.
+            return; // Already canonical – the exact search below would find the same thing.
         }
 
         $this->framework->initialize();

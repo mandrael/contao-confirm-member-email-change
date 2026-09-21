@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\EventListener;
 
+use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\OptIn\OptIn;
 use Contao\CoreBundle\OptIn\OptInTokenInterface;
@@ -15,6 +16,7 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
@@ -153,14 +155,87 @@ class EmailChangeListenerTest extends TestCase
         $listener->onSubmit();
     }
 
-    private function listener(OptIn $optIn, ContaoFramework|null $framework = null, LoggerInterface|null $logger = null): EmailChangeListener
+    /**
+     * A posted FORM_SUBMIT[] (array instead of scalar) must not turn the hook into an
+     * uncaught TypeError/exception - InputBag::get() throws on a non-scalar value,
+     * which is exactly why the source reads via all() instead.
+     */
+    public function testALoadLanguageFileWithFormSubmitAsAnArrayDoesNotThrowAndLeavesTheMessageUntouched(): void
+    {
+        $original = 'ERR.unique original';
+        $GLOBALS['TL_LANG']['ERR']['unique'] = $original;
+        $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'email-specific message';
+
+        try {
+            $this->listener($this->createStub(OptIn::class), requestStack: $this->frontendRequestStack(['FORM_SUBMIT' => ['a', 'b']]))
+                ->onLoadLanguageFile('default')
+            ;
+
+            self::assertSame($original, $GLOBALS['TL_LANG']['ERR']['unique']);
+        } finally {
+            unset($GLOBALS['TL_LANG']);
+        }
+    }
+
+    public function testALoadLanguageFileWithThePersonalDataFormSubmitReplacesTheMessage(): void
+    {
+        $GLOBALS['TL_LANG']['ERR']['unique'] = 'generic';
+        $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'email-specific message';
+
+        try {
+            $this->listener($this->createStub(OptIn::class), requestStack: $this->frontendRequestStack(['FORM_SUBMIT' => 'tl_member_5']))
+                ->onLoadLanguageFile('default')
+            ;
+
+            self::assertSame('email-specific message', $GLOBALS['TL_LANG']['ERR']['unique']);
+        } finally {
+            unset($GLOBALS['TL_LANG']);
+        }
+    }
+
+    /**
+     * A different frontend form with a unique field (e.g. registration, duplicate
+     * username) must keep the generic message.
+     */
+    public function testALoadLanguageFileWithARegistrationFormSubmitKeepsTheGenericMessage(): void
+    {
+        $original = 'generic';
+        $GLOBALS['TL_LANG']['ERR']['unique'] = $original;
+        $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'] = 'email-specific message';
+
+        try {
+            $this->listener($this->createStub(OptIn::class), requestStack: $this->frontendRequestStack(['FORM_SUBMIT' => 'tl_registration_5']))
+                ->onLoadLanguageFile('default')
+            ;
+
+            self::assertSame($original, $GLOBALS['TL_LANG']['ERR']['unique']);
+        } finally {
+            unset($GLOBALS['TL_LANG']);
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $post
+     */
+    private function frontendRequestStack(array $post): RequestStack
+    {
+        $request = new Request([], $post);
+        $request->attributes->set('_scope', ContaoCoreBundle::SCOPE_FRONTEND);
+
+        $requestStack = new RequestStack();
+        $requestStack->push($request);
+
+        return $requestStack;
+    }
+
+    private function listener(OptIn $optIn, ContaoFramework|null $framework = null, LoggerInterface|null $logger = null, RequestStack|null $requestStack = null): EmailChangeListener
     {
         return new EmailChangeListener(
             $optIn,
             $framework ?? $this->createStub(ContaoFramework::class),
             $this->createStub(TranslatorInterface::class),
             $this->createStub(UrlGeneratorInterface::class),
-            $this->createStub(RequestStack::class),
+            $requestStack ?? $this->createStub(RequestStack::class),
             $this->createStub(UnconfirmedTokenPurger::class),
             $logger,
         );

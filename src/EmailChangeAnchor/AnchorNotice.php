@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor;
 
 use Contao\CoreBundle\Framework\ContaoFramework;
+use Contao\Config;
 use Contao\Email;
+use Contao\StringUtil;
 use Doctrine\DBAL\Connection;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
@@ -44,8 +46,7 @@ class AnchorNotice
 
         try {
             $email = $this->framework->createInstance(Email::class);
-            $email->from = $GLOBALS['TL_ADMIN_EMAIL'] ?? null;
-            $email->fromName = $GLOBALS['TL_ADMIN_NAME'] ?? null;
+            $this->applySender($email);
             $email->subject = $this->trans('revokeNoticeSubject');
 
             $url = $this->urlGenerator->generate(
@@ -76,6 +77,37 @@ class AnchorNotice
         );
 
         return true;
+    }
+
+    /**
+     * The confirm/revoke routes and the resend cron run outside a Contao page, where the
+     * core never fills $GLOBALS['TL_ADMIN_EMAIL'] from the root page. Contao\Email then only
+     * falls back to the global setting, so an installation that keeps its administrator
+     * address on the root page alone would never send. Order: page context, global
+     * setting (left to the core), first root page that has an address.
+     */
+    public function applySender(Email $email): void
+    {
+        if (!empty($GLOBALS['TL_ADMIN_EMAIL'])) {
+            $email->from = $GLOBALS['TL_ADMIN_EMAIL'];
+            $email->fromName = $GLOBALS['TL_ADMIN_NAME'] ?? null;
+
+            return;
+        }
+
+        $this->framework->initialize();
+
+        if ($this->framework->getAdapter(Config::class)->get('adminEmail')) {
+            return;
+        }
+
+        $rootSender = $this->connection->fetchOne("SELECT adminEmail FROM tl_page WHERE type = 'root' AND adminEmail <> '' ORDER BY sorting LIMIT 1");
+
+        if (\is_string($rootSender) && '' !== $rootSender) {
+            [$name, $address] = $this->framework->getAdapter(StringUtil::class)->splitFriendlyEmail($rootSender);
+            $email->from = $address;
+            $email->fromName = $name ?: null;
+        }
     }
 
     private function trans(string $key): string
