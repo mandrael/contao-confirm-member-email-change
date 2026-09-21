@@ -31,7 +31,7 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
    sichtbar (kein Lockout, Login unverändert möglich) – mit einem deutlichen grünen Hinweis,
    dass die Änderung noch bestätigt werden muss.
 3. Mitglied öffnet den Link → ein schlanker Controller bestätigt den Token, schreibt die neue
-   Adresse und – falls eine E-Mail-als-Username-Erweiterung aktiv ist – zieht den Benutzernamen
+   Adresse und – falls der eigene Schalter oder eine E-Mail-als-Username-Erweiterung aktiv ist – zieht den Benutzernamen
    mit. Es folgt eine kurze Bestätigungsseite; bei aktivem E-Mail-Login wird das Mitglied
    abgemeldet und meldet sich mit der neuen Adresse neu an.
 
@@ -60,8 +60,8 @@ meldet sich anschließend mit der neuen Adresse an.
 
 ## E-Mail als Benutzername (Opt-in, ab 1.1)
 
-Alternative zu einer separaten Erweiterung: In `Einstellungen → E-Mail als Benutzername` lässt
-sich **„E-Mail als Benutzername“** direkt in diesem Bundle einschalten (Standard: aus). Eingeschaltet,
+Alternative zu einer separaten Erweiterung: In `Einstellungen → Mitglieder: E-Mail als Benutzername` lässt
+sich **„E-Mail-Adresse als Benutzername der Mitglieder“** direkt in diesem Bundle einschalten (Standard: aus). Eingeschaltet,
 gilt für den Login-Namen ausschließlich diese Regel:
 
 - **Kanonische Regel:** Login-Name = kleingeschriebene, getrimmte E-Mail-Adresse – zulässig nur bei

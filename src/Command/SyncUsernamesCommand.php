@@ -98,6 +98,10 @@ final class SyncUsernamesCommand extends Command
             $io->writeln(\sprintf('%s: %d', $label, $count));
         }
 
+        if ([] === $counts && null !== $groupId) {
+            $io->warning(\sprintf('Kein Mitglied gehört zur Gruppe %d. Stimmt die ID?', $groupId));
+        }
+
         if (!$force) {
             $io->note('Probelauf, es wurde nichts geschrieben. Mit --force ausführen, um zu schreiben. Vorher ein Datenbank-Backup anlegen.');
         }

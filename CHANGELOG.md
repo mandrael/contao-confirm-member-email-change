@@ -7,6 +7,16 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 ## [1.1.1] - Unveröffentlicht
 
 ### Behoben
+- Die Bestätigungsseite meldete jedes im selben Browser angemeldete Mitglied ab, auch ein anderes
+  als das bestätigte. Jetzt nur noch das bestätigte Mitglied.
+- Scheiterte die Benachrichtigung an die alte Adresse, entfiel die Abmeldung nach geändertem
+  Benutzernamen. Beide Schritte sind jetzt unabhängig.
+- Widerrufs- und Hinweis-Mail wurden nicht versendet, wenn die Administrator-E-Mail nur an der
+  Root-Seite stand (Bestätigungsseite und Cron laufen außerhalb einer Contao-Seite). Der Absender
+  wird jetzt auch von der Root-Seite gelesen.
+- Adressen mit Umlaut-Domain: Contao speichert sie als Punycode, die Anmeldung mit der lesbaren
+  Schreibweise fand das Mitglied nicht. Login-Eingabe und Benutzername nutzen jetzt dieselbe Form.
+- `member-email:sync-usernames --group=<id>` warnt, wenn zur Gruppe kein Mitglied gehört.
 - `member-email:sync-usernames --group=<wert>` lehnt einen nicht numerischen Wert mit Fehlercode ab.
   Vorher galt er als Gruppe 0, traf kein Mitglied und endete scheinbar erfolgreich.
 - Einstellungstext: Der Schalter „E-Mail als Benutzername“ nennt jetzt ausdrücklich, dass er nur

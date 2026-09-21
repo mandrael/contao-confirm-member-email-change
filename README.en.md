@@ -31,7 +31,7 @@ a confirmation link. Closes a gap acknowledged by the Contao core team itself
    notice. The profile keeps showing the **old** address (no lockout, login still works) – with a
    prominent green notice that the change still needs to be confirmed.
 3. The member opens the link → a thin controller confirms the token, writes the new address and
-   – if an email-as-username extension is active – keeps the username in sync. A short confirmation
+   – if the built-in switch or an email-as-username extension is active – keeps the username in sync. A short confirmation
    page follows; with an email login active the member is logged out and signs back in with the
    new address.
 
@@ -60,8 +60,8 @@ with the new address.
 
 ## Email as username (opt-in, since 1.1)
 
-An alternative to a separate extension: under `Settings → Email as username` you can switch on
-**"Email as username"** directly in this bundle (default: off). Once enabled, exactly this rule
+An alternative to a separate extension: under `Settings → Members: email as username` you can switch on
+**"Email address as member username"** directly in this bundle (default: off). Once enabled, exactly this rule
 governs the login name:
 
 - **Canonical rule:** login name = the lowercased, trimmed email address – only allowed at up to
