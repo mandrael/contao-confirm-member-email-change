@@ -53,7 +53,8 @@ with the new address.
 > otherwise the emails stay queued. With a synchronous mailer transport this does not apply.
 
 > **Requirement:** an effective administrator email address must be set – either on the root
-> page or in the global settings. Without it every send (confirmation, security notice, revoke
+> page or in the global settings (with several websites using different addresses it has to be the
+> global one, because the confirmation page and the cron do not know the website). Without it every send (confirmation, security notice, revoke
 > link) fails; the form still reports the same success to the visitor (a failed send is
 > never mirrored to the visitor) – a failed send is visible only
 > in the log.
@@ -167,7 +168,8 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   and the operator gets a log entry. Every failure shows the exact same generic message, regardless
   of the reason - a purely technical one included.
 - **A lost notice:** a failed send would leave the only way back unusable, so
-  `emailChangeAnchorNotified` is set only once the mail really went out; an hourly cron re-sends
+  `emailChangeAnchorNotified` is set only once the mailer accepted the mail (with an
+  asynchronous transport: handed over to the queue, whose own retries are the transport's business); an hourly cron re-sends
   the **same** already-issued link (from `emailChangeAnchorPending`) for valid, unnotified anchors
   - the deadline is never extended and the link never rotated, a duplicate send of the same link
   is harmless. When that cron runs on the CLI, `framework.router.default_uri` has to be set,

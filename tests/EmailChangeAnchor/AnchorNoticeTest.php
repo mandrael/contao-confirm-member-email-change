@@ -147,9 +147,9 @@ class AnchorNoticeTest extends ContaoTestCase
         ]);
 
         $connection = $this->createMock(Connection::class);
-        $connection->expects(self::once())->method('fetchOne')
+        $connection->expects(self::once())->method('fetchFirstColumn')
             ->with(self::stringContains('tl_page'))
-            ->willReturn('Root Admin [root@example.com]')
+            ->willReturn(['Root Admin [root@example.com]'])
         ;
 
         (new AnchorNotice($framework, $connection, $this->createStub(TranslatorInterface::class), $this->createStub(UrlGeneratorInterface::class)))
@@ -158,6 +158,24 @@ class AnchorNoticeTest extends ContaoTestCase
 
         self::assertSame('root@example.com', $email->from);
         self::assertSame('Root Admin', $email->fromName);
+    }
+
+    public function testApplySenderDoesNotGuessBetweenSeveralRootSenders(): void
+    {
+        $email = $this->createPartialMock(Email::class, []);
+        $framework = $this->createContaoFrameworkMock([
+            \Contao\Config::class => $this->createConfiguredAdapterMock(['get' => '']),
+            StringUtil::class => new Adapter(StringUtil::class),
+        ]);
+
+        $connection = $this->createMock(Connection::class);
+        $connection->method('fetchFirstColumn')->willReturn(['one@example.com', 'two@example.com']);
+
+        (new AnchorNotice($framework, $connection, $this->createStub(TranslatorInterface::class), $this->createStub(UrlGeneratorInterface::class)))
+            ->applySender($email)
+        ;
+
+        self::assertNull($email->from);
     }
 
     private function notice(Email $email, Connection $connection, LoggerInterface|null $logger = null): AnchorNotice

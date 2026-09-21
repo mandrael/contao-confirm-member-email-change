@@ -13,7 +13,8 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
   Benutzernamen. Beide Schritte sind jetzt unabhängig.
 - Widerrufs- und Hinweis-Mail wurden nicht versendet, wenn die Administrator-E-Mail nur an der
   Root-Seite stand (Bestätigungsseite und Cron laufen außerhalb einer Contao-Seite). Der Absender
-  wird jetzt auch von der Root-Seite gelesen.
+  wird jetzt auch von der Root-Seite gelesen, sofern die Installation nur eine Absender-Adresse an
+  ihren Root-Seiten hat; bei mehreren Websites die globale Administrator-E-Mail setzen.
 - Adressen mit Umlaut-Domain: Contao speichert sie als Punycode, die Anmeldung mit der lesbaren
   Schreibweise fand das Mitglied nicht. Login-Eingabe und Benutzername nutzen jetzt dieselbe Form.
 - `member-email:sync-usernames --group=<id>` warnt, wenn zur Gruppe kein Mitglied gehört.
@@ -40,7 +41,7 @@ die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Anmeldung mit abweichender Groß-/Kleinschreibung der E-Mail, unabhängig vom Schalter.
 - Widerrufslink: Nach einer bestätigten Adressänderung erhält die alte Adresse einen 14 Tage
   gültigen Link, der die Änderung rückgängig macht, das Kennwort ungültig setzt und offene Links
-  entwertet. Scheitert der Versand, wird derselbe Link stündlich erneut gesendet.
+  entwertet. Nimmt der Mailer die Mail nicht an, wird derselbe Link stündlich erneut gesendet.
 - Eine bestätigte Adressänderung entwertet offene „Kennwort vergessen“-Links des Mitglieds.
 
 ### Geändert

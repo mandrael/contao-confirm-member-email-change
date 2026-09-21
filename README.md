@@ -54,7 +54,8 @@ meldet sich anschließend mit der neuen Adresse an.
 > entfällt das.
 
 > **Voraussetzung:** Eine wirksame Administrator-E-Mail-Adresse muss gesetzt sein – entweder auf
-> der Root-Seite oder in den globalen Einstellungen. Ohne sie schlägt jeder Versand (Bestätigung,
+> der Root-Seite oder in den globalen Einstellungen (bei mehreren Websites mit unterschiedlichen
+> Adressen zwingend global, denn Bestätigungsseite und Cron kennen die Website nicht). Ohne sie schlägt jeder Versand (Bestätigung,
 > Sicherheits-Benachrichtigung, Widerruf-Link) fehl; das Formular meldet dem Besucher trotzdem
 > denselben Erfolg (ein Versandfehler wird nicht nach außen gespiegelt) – ein Fehlschlag ist ausschließlich im Log sichtbar.
 
@@ -174,8 +175,9 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   Log-Eintrag. Jeder Fehlschlag zeigt dieselbe allgemeine Meldung, unabhängig vom Grund – auch ein
   rein technischer.
 - **Verlorene Benachrichtigung:** Schlägt der Versand fehl, bliebe die einzige Rückholmöglichkeit
-  unbrauchbar. Deshalb wird `emailChangeAnchorNotified` erst gesetzt, wenn die Mail wirklich
-  draußen ist; ein stündlicher Cron sendet für gültige, unbenachrichtigte Anker **denselben**
+  unbrauchbar. Deshalb wird `emailChangeAnchorNotified` erst gesetzt, wenn der Mailer die Mail
+  angenommen hat (bei asynchronem Versand: an die Warteschlange übergeben – deren eigene
+  Wiederholungen sind Sache des Transports); ein stündlicher Cron sendet für gültige, unbenachrichtigte Anker **denselben**
   bereits ausgestellten Link erneut (aus `emailChangeAnchorPending`) – die Frist wird nie
   verlängert und der Link nie rotiert, ein doppelter Versand desselben Links ist unschädlich.
   Läuft der Cron per CLI, muss `framework.router.default_uri` gesetzt sein, sonst kennt die

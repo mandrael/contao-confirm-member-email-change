@@ -84,7 +84,7 @@ class AnchorNotice
      * core never fills $GLOBALS['TL_ADMIN_EMAIL'] from the root page. Contao\Email then only
      * falls back to the global setting, so an installation that keeps its administrator
      * address on the root page alone would never send. Order: page context, global
-     * setting (left to the core), first root page that has an address.
+     * setting (left to the core), the root page address if the installation has only one.
      */
     public function applySender(Email $email): void
     {
@@ -101,10 +101,13 @@ class AnchorNotice
             return;
         }
 
-        $rootSender = $this->connection->fetchOne("SELECT adminEmail FROM tl_page WHERE type = 'root' AND adminEmail <> '' ORDER BY sorting LIMIT 1");
+        // Only when the installation has exactly ONE distinct root sender: with several
+        // websites neither this route nor the cron knows which one the member belongs to, and
+        // a guessed sender would be worse than the logged failure (set the global address then).
+        $rootSenders = $this->connection->fetchFirstColumn("SELECT DISTINCT adminEmail FROM tl_page WHERE type = 'root' AND adminEmail <> '' LIMIT 2");
 
-        if (\is_string($rootSender) && '' !== $rootSender) {
-            [$name, $address] = $this->framework->getAdapter(StringUtil::class)->splitFriendlyEmail($rootSender);
+        if (1 === \count($rootSenders) && \is_string($rootSenders[0])) {
+            [$name, $address] = $this->framework->getAdapter(StringUtil::class)->splitFriendlyEmail($rootSenders[0]);
             $email->from = $address;
             $email->fromName = $name ?: null;
         }
