@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [1.1.1] - Unveröffentlicht
+## [1.1.1] - 2026-09-23
 
 ### Behoben
 - Die Bestätigungsseite meldete jedes im selben Browser angemeldete Mitglied ab, auch ein anderes
