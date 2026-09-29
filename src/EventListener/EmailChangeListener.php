@@ -9,9 +9,11 @@ use Contao\CoreBundle\DependencyInjection\Attribute\AsCallback;
 use Contao\CoreBundle\DependencyInjection\Attribute\AsHook;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\OptIn\OptIn;
+use Contao\CoreBundle\OptIn\OptInTokenInterface;
 use Contao\Email;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -48,6 +50,7 @@ class EmailChangeListener
         private readonly UrlGeneratorInterface $urlGenerator,
         private readonly RequestStack $requestStack,
         private readonly UnconfirmedTokenPurger $tokenPurger,
+        private readonly Connection $connection,
         private readonly LoggerInterface|null $logger = null,
     ) {
     }
@@ -130,24 +133,38 @@ class EmailChangeListener
         [$memberId, $oldEmail, $newEmail] = $this->pendingChange;
         $this->pendingChange = null;
 
-        // Replace any earlier unconfirmed email-change token of this member.
-        $this->tokenPurger->purge($memberId, self::PREFIX);
-
         try {
-            $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
-
-            $url = $this->urlGenerator->generate(
-                'mandrael_confirm_member_email_change',
-                ['token' => $token->getIdentifier()],
-                UrlGeneratorInterface::ABSOLUTE_URL,
-            );
-
-            $token->send(
-                $this->trans('confirmEmailChange.subject'),
-                \sprintf($this->trans('confirmEmailChange.text'), $url),
-            );
+            $token = $this->issueToken($memberId, $oldEmail, $newEmail);
         } catch (\Throwable $e) {
-            $this->logger?->error(\sprintf('Could not send the email-change confirmation link for member ID %d: %s.', $memberId, $e::class));
+            if ($this->connection->isTransactionActive()) {
+                $this->connection->rollBack();
+            }
+
+            $this->logger?->error(\sprintf('Could not create the email-change confirmation link for member ID %d: %s.', $memberId, $e::class));
+            $token = false;
+        }
+
+        // The address changed under this request (typically a revoke via the security
+        // anchor committed in between): this change request is void.
+        if (null === $token) {
+            return;
+        }
+
+        if (false !== $token) {
+            try {
+                $url = $this->urlGenerator->generate(
+                    'mandrael_confirm_member_email_change',
+                    ['token' => $token->getIdentifier()],
+                    UrlGeneratorInterface::ABSOLUTE_URL,
+                );
+
+                $token->send(
+                    $this->trans('confirmEmailChange.subject'),
+                    \sprintf($this->trans('confirmEmailChange.text'), $url),
+                );
+            } catch (\Throwable $e) {
+                $this->logger?->error(\sprintf('Could not send the email-change confirmation link for member ID %d: %s.', $memberId, $e::class));
+            }
         }
 
         try {
@@ -190,6 +207,36 @@ class EmailChangeListener
         if (isset($GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'])) {
             $GLOBALS['TL_LANG']['ERR']['unique'] = $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['emailExists'];
         }
+    }
+
+    /**
+     * Purge and create under the member row lock, and only while the address is still
+     * the one this request started from. The field callback read it before the lock;
+     * a revoke that commits between the two callbacks resets the address and purges
+     * every pending link, and a link issued afterwards would carry the account away
+     * again. Contao's Model layer uses this very connection, so purge and create join
+     * the transaction.
+     */
+    private function issueToken(int $memberId, string $oldEmail, string $newEmail): ?OptInTokenInterface
+    {
+        $this->connection->beginTransaction();
+
+        $current = $this->connection->fetchOne('SELECT email FROM tl_member WHERE id = ? FOR UPDATE', [$memberId]);
+
+        if (false === $current || (string) $current !== $oldEmail) {
+            $this->connection->rollBack();
+            $this->logger?->warning(\sprintf('Email-change request for member ID %d dropped: the address changed while the form was being saved.', $memberId));
+
+            return null;
+        }
+
+        // Replace any earlier unconfirmed email-change link of this member.
+        $this->tokenPurger->purge($memberId, self::PREFIX);
+        $token = $this->optIn->create(self::PREFIX, $newEmail, ['tl_member' => [$memberId]]);
+
+        $this->connection->commit();
+
+        return $token;
     }
 
     private function notifyOldAddress(string $oldEmail, string $newEmail): void

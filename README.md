@@ -164,11 +164,15 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
 - **Widerruf:** Ein `GET` auf den Link zeigt nur eine Bestätigungsseite (ein Mail-Scanner, der
   Links vorab abruft, löst dadurch nichts aus); erst ein `POST` mit Contaos üblichem
   Formular-Token führt die Änderung durch – unter Zeilensperre (`SELECT … FOR UPDATE`) und
-  Transaktion, mit erneuter Prüfung von Hash, Ablauf und ob die wiederherzustellende Adresse
-  inzwischen einem anderen Konto gehört. Bei Erfolg: alte Adresse wiederhergestellt, Benutzername
-  wie oben an die wiederhergestellte Adresse angeglichen, Kennwort ungültig gemacht (kein login-Feld
-  wird angetastet – das bleibt Betreiber-Sache), alle unbestätigten Opt-in-Token des Mitglieds
-  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Kann der Benutzername
+  Transaktion, mit erneuter Prüfung von Hash und Ablauf. Bei Erfolg: alte Adresse
+  wiederhergestellt, Benutzername wie oben an die wiederhergestellte Adresse angeglichen (auch wenn
+  der Schalter inzwischen aus ist, sofern der Benutzername noch die ersetzte Adresse war), Kennwort
+  ungültig gemacht (kein login-Feld wird angetastet – das bleibt Betreiber-Sache), alle
+  unbestätigten Opt-in-Token und alle gespeicherten „Angemeldet bleiben“-Anmeldungen des Mitglieds
+  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Trägt inzwischen ein
+  anderes Mitglied die wiederherzustellende Adresse (etwa eine sofort danach angelegte, nie
+  aktivierte Registrierung), wird trotzdem wiederhergestellt und der Betreiber per Log-Eintrag auf
+  das Duplikat hingewiesen – sonst ließe sich der Widerruf auf diesem Weg blockieren. Kann der Benutzername
   der wiederhergestellten Adresse nicht folgen, weil ihn inzwischen jemand anderes trägt, wird der
   Widerruf trotzdem durchgeführt – Adresse und Kennwort sind eine Sicherheitsfunktion und dürfen
   daran nicht scheitern; der Benutzername bleibt dann stehen und der Betreiber bekommt einen
@@ -183,8 +187,9 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   Läuft der Cron per CLI, muss `framework.router.default_uri` gesetzt sein, sonst kennt die
   Kommandozeile die Domain der Website nicht.
 - **Sperrprotokoll:** Bestätigung und Widerruf laufen nach demselben Ablauf – Transaktion,
-  Zeilensperre auf das Mitglied (`SELECT … FOR UPDATE`), danach alles frisch und sperrend
-  nachlesen, dann Link-Verbrauch, Adresse, Benutzername, Anker und das Aufräumen offener Token
+  Zeilensperre auf das Mitglied (`SELECT … FOR UPDATE`), danach Mitglieds- und Linkzeile frisch
+  und sperrend nachlesen (die Prüfung auf eine anderweitig vergebene Adresse und die Eignung als
+  Benutzername sind nicht durchgehend sperrend), dann Link-Verbrauch, Adresse, Benutzername, Anker und das Aufräumen offener Token
   gemeinsam festschreiben. Bewusst **ohne** benannten `GET_LOCK`: ein Verzeichnis-Bundle, das vor
   dieser Zeilensperre einen benannten Lock nimmt, bekäme sonst die umgekehrte Sperrreihenfolge.
 - **Aufräumen:** Ein täglicher Cron leert abgelaufene Anker-Felder, damit alte Adressen nicht

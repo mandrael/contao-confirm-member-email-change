@@ -8,6 +8,7 @@ use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\Csrf\ContaoCsrfTokenManager;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\FrontendUser;
+use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
@@ -67,6 +68,8 @@ class RevokeEmailChangeController
         // indexed – regardless of which branch above produced it.
         $response->headers->set('Cache-Control', 'private, no-store');
         $response->headers->set('X-Robots-Tag', 'noindex');
+        // The URL is the credential: a click on "back to the site" must not hand it on.
+        $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
     }
@@ -157,8 +160,8 @@ class RevokeEmailChangeController
      */
     private function revokeUnderLock(string $token): ?int
     {
-        // Look the row up WITHOUT a lock first: emailChangeAnchorHash carries no index,
-        // so a locking read on it would lock every row the scan touches. This id may be
+        // Look the row up WITHOUT a lock first and lock by primary key afterwards, so the
+        // lock never depends on how the hash lookup is executed. This id may be
         // stale by the time the lock is granted, which is why everything below is
         // verified again against the locked row.
         $memberId = (int) $this->connection->fetchOne(
@@ -200,18 +203,19 @@ class RevokeEmailChangeController
             [$restoredEmail, $memberId],
         );
 
+        // Not fatal: whoever moved the account away from this address can register a
+        // throwaway (never activated) member with it right afterwards, and aborting here
+        // would lock the real owner out for good. tl_member.email is DCA-unique only, so
+        // the DB accepts the duplicate; the operator gets a log entry to clear it up.
         if ($conflict > 0) {
-            $this->connection->rollBack();
-            $this->logger?->warning(\sprintf('Email-change revoke for member ID %d aborted: the restored address is meanwhile taken by another member.', $memberId));
-
-            return null;
+            $this->logger?->warning(\sprintf('Email-change revoke for member ID %d restored an address that another member carries as well. Please check for a duplicate.', $memberId));
         }
 
         // Same sync as ConfirmEmailChangeController, just backwards: the "current"
         // email is the (possibly compromised) address being replaced, the "new" one is
         // the address being restored.
         $oldUsername = (string) ($row['username'] ?? '');
-        $newUsername = $this->usernameChangeSync->resolve($oldUsername, (string) $row['email'], $restoredEmail, $memberId);
+        $newUsername = $this->usernameChangeSync->resolveForRevoke($oldUsername, (string) $row['email'], $restoredEmail, $memberId);
 
         if (null === $newUsername && $this->usernameChangeSync->rejects($restoredEmail, $memberId)) {
             // One of the two DELIBERATE exceptions to "username IS the
@@ -244,6 +248,7 @@ class RevokeEmailChangeController
         // anchor. Contao's Model layer uses this very connection (core Database.php:64-66),
         // so these deletes are part of the same transaction.
         $this->tokenPurger->purgeAll($memberId);
+        $this->purgeRememberMeTokens($oldUsername, $newUsername);
 
         $this->connection->commit();
 
@@ -260,6 +265,30 @@ class RevokeEmailChangeController
      * itself defines as returning false for an unrecognized hash). Login by password
      * becomes impossible without touching tl_member.login, which stays operator-owned.
      */
+    /**
+     * The replaced password ends every session (Contao User::isEqualTo() compares it),
+     * but not a persistent remember-me cookie: Symfony 6.4's PersistentRememberMeHandler
+     * reloads the user by identifier without looking at the password, so whoever held
+     * the account could sign straight back in. Drop every stored series for the login
+     * names involved. No error boundary of its own: a revoke that leaves these logins
+     * alive is no revoke, so a failure here rolls the whole transaction back and the
+     * owner can simply try again.
+     */
+    private function purgeRememberMeTokens(string $oldUsername, ?string $newUsername): void
+    {
+        $usernames = array_values(array_unique(array_filter([$oldUsername, (string) $newUsername], static fn (string $u): bool => '' !== $u)));
+
+        if ([] === $usernames) {
+            return;
+        }
+
+        $this->connection->executeStatement(
+            'DELETE FROM rememberme_token WHERE username IN (?)',
+            [$usernames],
+            [ArrayParameterType::STRING],
+        );
+    }
+
     private function invalidatedPasswordHash(): string
     {
         return 'invalidated$'.bin2hex(random_bytes(32));

@@ -79,4 +79,28 @@ final class UsernameChangeSync
 
         return null;
     }
+
+    /**
+     * resolve() for the revoke direction, plus one case it leaves alone: the switch was
+     * on when the account was taken over and has been turned off since. The login name
+     * then still IS the compromised address, and keeping it would leave the owner with
+     * the attacker's address as their login name. So it follows the restored address
+     * whenever it was demonstrably synced to the address being replaced.
+     */
+    public function resolveForRevoke(?string $currentUsername, string $currentEmail, string $restoredEmail, int $excludeMemberId): ?string
+    {
+        $resolved = $this->resolve($currentUsername, $currentEmail, $restoredEmail, $excludeMemberId);
+
+        if (
+            null === $resolved
+            && !$this->policy->isEnabled()
+            && '' !== (string) $currentUsername
+            && CanonicalUsername::normalize($currentEmail) === $currentUsername
+            && EligibilityReason::Eligible === $this->usernamePolicy->evaluate($restoredEmail, $excludeMemberId)
+        ) {
+            return CanonicalUsername::normalize($restoredEmail);
+        }
+
+        return $resolved;
+    }
 }

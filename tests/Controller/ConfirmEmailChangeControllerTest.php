@@ -59,7 +59,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
             // tl_opt_in_related rows are written once when the token is created and are
             // never updated - only reachable via the ALREADY-locked tl_opt_in.id, so they
             // need no lock of their own (Review Runde 3).
-            if (str_starts_with($entry, 'read:SELECT') && !str_contains($entry, 'COUNT(*)') && !str_contains($entry, self::RELATED_SQL)) {
+            if (str_starts_with($entry, 'read:SELECT') && !str_contains($entry, self::RELATED_SQL)) {
                 self::assertStringContainsString('FOR UPDATE', $entry, 'every re-read after the lock must be a locking read');
             }
         }
@@ -366,6 +366,27 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
 
         self::assertSame('no-store, private', $response->headers->get('Cache-Control'));
         self::assertSame('noindex', $response->headers->get('X-Robots-Tag'));
+        self::assertSame('no-referrer', $response->headers->get('Referrer-Policy'));
+    }
+
+    /**
+     * The address was taken while the link was pending: nothing is written, the link
+     * stays unused. The check is a locking read so two parallel confirmations of the
+     * same address cannot both pass a transaction snapshot.
+     */
+    public function testAnAddressTakenMeanwhileIsRefusedWithoutWriting(): void
+    {
+        $optInToken = $this->optInToken();
+        $optInToken->expects(self::never())->method('confirm');
+
+        $response = $this->invokeController($this->connection(takenBy: 9), optInToken: $optInToken);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame([], $this->statementsContaining('UPDATE tl_member'));
+        self::assertContains('rollBack', $this->log);
+
+        $check = array_values(array_filter($this->log, static fn (string $e): bool => str_contains($e, 'WHERE email = ?')));
+        self::assertStringContainsString('FOR UPDATE', $check[0] ?? '');
     }
 
     /**
@@ -373,7 +394,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
      * @param array<string, mixed>|null              $tokenRow
      * @param list<array<string, mixed>>|null         $relatedRows rows of tl_opt_in_related (relTable/relId)
      */
-    private function connection(array|null $memberRow = null, array|null $tokenRow = null, array|null $relatedRows = null): Connection
+    private function connection(array|null $memberRow = null, array|null $tokenRow = null, array|null $relatedRows = null, int|false $takenBy = false): Connection
     {
         return $this->createConnectionMock(
             [
@@ -392,7 +413,7 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
                     'email' => 'new@example.com',
                 ],
             ],
-            ['COUNT(*)' => 0],
+            ['WHERE email = ?' => $takenBy],
             [self::RELATED_SQL => $relatedRows ?? [['relTable' => 'tl_member', 'relId' => 7]]],
         );
     }

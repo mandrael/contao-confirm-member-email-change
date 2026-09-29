@@ -93,17 +93,77 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
      * generic message (never confirm or deny which case applies) and log only the
      * member ID, never an email address.
      */
-    public function testAddressCollisionAbortsWithoutRevealingTheReason(): void
+    /**
+     * Whoever moved the account away can register a throwaway member with the old
+     * address right afterwards. The revoke is the owner's way back and must not be
+     * blockable that way: it goes through, the duplicate is logged without an address.
+     */
+    public function testAddressCollisionDoesNotBlockTheRevoke(): void
     {
         $connection = $this->connection(conflicts: 1);
 
         $logger = $this->createMock(LoggerInterface::class);
-        $logger->expects(self::once())->method('warning')->with(self::logicalNot(self::stringContains('victim@example.com')));
+        $logger->expects(self::once())->method('warning')->with(self::logicalAnd(
+            self::stringContains('member ID 7'),
+            self::logicalNot(self::stringContains('@example.com')),
+        ));
 
         $response = $this->invoke($connection, 'POST', $logger);
 
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('victim@example.com', $this->statementsContaining('UPDATE tl_member SET email')[0]['params'][0] ?? null);
+        self::assertContains('commit', $this->log);
+    }
+
+    /**
+     * The replaced password ends sessions, but a stored remember-me series would log the
+     * previous holder straight back in (Symfony 6.4 does not bind it to the password).
+     */
+    public function testRevokeDropsTheRememberMeLoginsInsideTheTransaction(): void
+    {
+        $response = $this->invoke($this->connection(), 'POST');
+
+        self::assertSame(200, $response->getStatusCode());
+
+        $delete = $this->statementsContaining('DELETE FROM rememberme_token')[0] ?? null;
+        self::assertNotNull($delete);
+        self::assertSame(['johndoe'], $delete['params'][0]);
+        self::assertLessThan(array_search('commit', $this->log, true), array_search('write:'.$delete['sql'], $this->log, true));
+        self::assertSame('no-referrer', $response->headers->get('Referrer-Policy'));
+    }
+
+    /**
+     * A revoke that leaves the remember-me logins alive is no revoke: if their removal
+     * fails, the whole transaction is rolled back and nothing is reported as done.
+     */
+    public function testAFailedRememberMeRemovalRollsTheRevokeBack(): void
+    {
+        $connection = $this->connection();
+        $this->failWriteOn = 'rememberme_token';
+
+        try {
+            $response = $this->invoke($connection, 'POST');
+        } finally {
+            $this->failWriteOn = null;
+        }
+
         self::assertSame(400, $response->getStatusCode());
-        self::assertSame([], $this->statements);
+        self::assertNotContains('commit', $this->log);
+        self::assertContains('rollBack', $this->log);
+    }
+
+    /**
+     * The switch was on during the takeover and is off now: the login name still IS the
+     * compromised address and has to follow the restored one.
+     */
+    public function testALoginNameSyncedToTheCompromisedAddressFollowsEvenWithTheSwitchOff(): void
+    {
+        $this->invoke($this->connection(['username' => 'compromised@example.com']), 'POST');
+
+        $update = $this->statementsContaining('UPDATE tl_member SET email')[0] ?? null;
+        self::assertNotNull($update);
+        self::assertStringContainsString('username = ?', $update['sql']);
+        self::assertSame('victim@example.com', $update['params'][1]);
     }
 
     public function testSuccessfulRevokeRestoresTheOldAddressAndInvalidatesThePassword(): void

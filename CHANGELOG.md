@@ -4,6 +4,33 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [1.1.2] - 2026-09-29
+
+### Behoben
+- Widerruf: gespeicherte „Angemeldet bleiben“-Anmeldungen des Mitglieds werden jetzt in derselben
+  Transaktion gelöscht; scheitert das, wird der ganze Widerruf zurückgerollt.
+  Unter Symfony 6.4 (Contao 5.3) hätte ein solches Cookie den bisherigen Inhaber des Kontos sonst
+  ohne Kennwort wieder angemeldet.
+- Widerruf: Trägt inzwischen ein anderes Mitglied die wiederherzustellende Adresse, bricht der
+  Widerruf nicht mehr ab. Eine sofort nach der Übernahme angelegte Registrierung mit der alten
+  Adresse konnte ihn sonst dauerhaft blockieren. Das Duplikat wird geloggt.
+- Widerruf: Der Benutzername folgt der wiederhergestellten Adresse auch dann, wenn der Schalter
+  „E-Mail als Benutzername“ inzwischen ausgeschaltet ist, sofern er noch die ersetzte Adresse war.
+- Ein Widerruf zwischen Speichern und Abschluss eines Profilformulars konnte von einer danach noch
+  ausgestellten Bestätigungsmail überholt werden. Der Link entsteht jetzt unter Zeilensperre und
+  nur, solange die Adresse noch die Ausgangsadresse ist.
+- Bestätigung: Die Prüfung, ob die neue Adresse inzwischen vergeben ist, sperrt jetzt. Zwei
+  parallele Bestätigungen derselben Adresse konnten beide durchkommen. Die Garantie gilt unter der
+  MySQL/MariaDB-Standardisolation `REPEATABLE READ`; unter `READ COMMITTED` bleibt ein kleines
+  Fenster.
+- Registrierung mit „E-Mail als Benutzername“: Ein Kennwort gleich der E-Mail-Adresse wird wie im
+  Core abgelehnt (die Core-Prüfung greift nur beim geposteten Benutzernamen).
+- Bestätigungs- und Widerrufsseite senden `Referrer-Policy: no-referrer`, damit der Link beim
+  Klick auf „Zurück zur Website“ nicht weitergegeben wird.
+- Index auf `tl_member.emailChangeAnchorHash` (Datenbank-Update nötig), damit die öffentliche
+  Widerrufs-Route nicht die ganze Mitgliedertabelle durchsucht.
+- `composer.json`: `symfony/password-hasher` als direkte Abhängigkeit.
+
 ## [1.1.1] - 2026-09-23
 
 ### Behoben

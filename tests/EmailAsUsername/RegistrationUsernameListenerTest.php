@@ -13,6 +13,9 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityRea
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\RegistrationUsernameListener;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
+use Contao\Input;
+use Symfony\Component\PasswordHasher\Hasher\PasswordHasherFactoryInterface;
+use Symfony\Component\PasswordHasher\PasswordHasherInterface;
 
 class RegistrationUsernameListenerTest extends ContaoTestCase
 {
@@ -101,7 +104,42 @@ class RegistrationUsernameListenerTest extends ContaoTestCase
         self::assertArrayHasKey('firstname', $options);
     }
 
-    private function listener(bool $enabled, UsernamePolicy $usernamePolicy, ?ContaoFramework $framework = null): RegistrationUsernameListener
+    /**
+     * The core refuses a password equal to the POSTED username; with the switch on no
+     * username is posted, so the rule is applied to the address instead - registration
+     * only, and in both the typed and the canonical form.
+     */
+    public function testRefusesARegistrationPasswordEqualToTheEmail(): void
+    {
+        $GLOBALS['TL_LANG']['ERR']['passwordName'] = 'same as username';
+
+        $hasher = $this->createMock(PasswordHasherInterface::class);
+        $hasher->method('verify')->willReturnCallback(static fn (string $hash, string $plain): bool => 'alice@example.org' === $plain);
+
+        $factory = $this->createStub(PasswordHasherFactoryInterface::class);
+        $factory->method('getPasswordHasher')->willReturn($hasher);
+
+        $framework = $this->createContaoFrameworkMock([Input::class => $this->createConfiguredAdapterMock(['post' => 'Alice@Example.org'])]);
+
+        try {
+            $this->expectExceptionMessage('same as username');
+            $this->listener(true, $this->createStub(UsernamePolicy::class), $framework, $factory)->onSavePassword('$hash', null);
+        } finally {
+            unset($GLOBALS['TL_LANG']);
+        }
+    }
+
+    public function testPasswordCheckIgnoresProfileBackendAndSwitchOff(): void
+    {
+        $factory = $this->createMock(PasswordHasherFactoryInterface::class);
+        $factory->expects(self::never())->method('getPasswordHasher');
+
+        $on = $this->listener(true, $this->createStub(UsernamePolicy::class), null, $factory);
+        self::assertSame('$hash', $on->onSavePassword('$hash', new \stdClass()));
+        self::assertSame('$hash', $this->listener(false, $this->createStub(UsernamePolicy::class), null, $factory)->onSavePassword('$hash', null));
+    }
+
+    private function listener(bool $enabled, UsernamePolicy $usernamePolicy, ?ContaoFramework $framework = null, ?PasswordHasherFactoryInterface $hasherFactory = null): RegistrationUsernameListener
     {
         $policy = $this->createMock(EmailAsUsernamePolicy::class);
         $policy->method('isEnabled')->willReturn($enabled);
@@ -110,6 +148,7 @@ class RegistrationUsernameListenerTest extends ContaoTestCase
             $policy,
             $usernamePolicy,
             $framework ?? $this->createContaoFrameworkMock(),
+            $hasherFactory ?? $this->createStub(PasswordHasherFactoryInterface::class),
         );
     }
 }

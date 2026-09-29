@@ -12,7 +12,9 @@ use Contao\Email;
 use Contao\FrontendUser;
 use Contao\ModulePersonalData;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EventListener\EmailChangeListener;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\ConnectionMockTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -23,6 +25,8 @@ use Symfony\Contracts\Translation\TranslatorInterface;
 
 class EmailChangeListenerTest extends TestCase
 {
+    use ConnectionMockTrait;
+
     /**
      * The critical safety guard: when the address did not effectively change,
      * no opt-in token is created and the value is passed through untouched.
@@ -228,7 +232,34 @@ class EmailChangeListenerTest extends TestCase
         return $requestStack;
     }
 
-    private function listener(OptIn $optIn, ContaoFramework|null $framework = null, LoggerInterface|null $logger = null, RequestStack|null $requestStack = null): EmailChangeListener
+    /**
+     * A revoke committed between the field callback and onSubmit resets the address and
+     * purges every pending link. A link issued afterwards would take the account away
+     * again, so onSubmit re-reads the address under the row lock and drops the request.
+     */
+    public function testDropsTheChangeWhenTheAddressChangedBeforeOnSubmit(): void
+    {
+        $optIn = $this->createMock(OptIn::class);
+        $optIn->expects(self::never())->method('create');
+
+        $framework = $this->createMock(ContaoFramework::class);
+        $framework->expects(self::never())->method('createInstance');
+
+        $purger = $this->createMock(UnconfirmedTokenPurger::class);
+        $purger->expects(self::never())->method('purge');
+
+        $connection = $this->createConnectionMock(scalars: ['SELECT email FROM tl_member' => 'restored@example.com']);
+
+        $listener = $this->listener($optIn, $framework, connection: $connection, purger: $purger);
+        $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
+        $listener->onSubmit();
+
+        self::assertSame('begin', $this->log[0]);
+        self::assertStringContainsString('FOR UPDATE', $this->log[1]);
+        self::assertSame('rollBack', $this->log[2]);
+    }
+
+    private function listener(OptIn $optIn, ContaoFramework|null $framework = null, LoggerInterface|null $logger = null, RequestStack|null $requestStack = null, Connection|null $connection = null, UnconfirmedTokenPurger|null $purger = null): EmailChangeListener
     {
         return new EmailChangeListener(
             $optIn,
@@ -236,7 +267,8 @@ class EmailChangeListenerTest extends TestCase
             $this->createStub(TranslatorInterface::class),
             $this->createStub(UrlGeneratorInterface::class),
             $requestStack ?? $this->createStub(RequestStack::class),
-            $this->createStub(UnconfirmedTokenPurger::class),
+            $purger ?? $this->createStub(UnconfirmedTokenPurger::class),
+            $connection ?? $this->createConnectionMock(scalars: ['SELECT email FROM tl_member' => 'old@example.com']),
             $logger,
         );
     }

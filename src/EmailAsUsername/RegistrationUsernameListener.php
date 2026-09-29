@@ -8,9 +8,12 @@ use Contao\CoreBundle\DependencyInjection\Attribute\AsCallback;
 use Contao\CoreBundle\DependencyInjection\Attribute\AsHook;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\DataContainer;
+use Contao\FrontendUser;
+use Contao\Input;
 use Contao\MemberModel;
 use Contao\System;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\PasswordHasher\Hasher\PasswordHasherFactoryInterface;
 
 /**
  * A3 (bullet 2): registration. ModuleRegistration inserts the new row itself
@@ -37,8 +40,40 @@ final class RegistrationUsernameListener
         private readonly EmailAsUsernamePolicy $policy,
         private readonly UsernamePolicy $usernamePolicy,
         private readonly ContaoFramework $framework,
+        private readonly PasswordHasherFactoryInterface $passwordHasherFactory,
         private readonly LoggerInterface|null $logger = null,
     ) {
+    }
+
+    /**
+     * ModuleRegistration refuses a password equal to the POSTED username, and the
+     * username field is not posted while the switch is on – the login name only comes
+     * from the email after the insert. So the core rule would never fire; apply it to
+     * the address instead. Only the registration call ($value, null): the value is the
+     * hash the password widget already produced.
+     */
+    #[AsCallback(table: 'tl_member', target: 'fields.password.save')]
+    public function onSavePassword(mixed $value, mixed $user = null, mixed $module = null): mixed
+    {
+        if (null !== $user || !\is_string($value) || '' === $value || !$this->policy->isEnabled()) {
+            return $value;
+        }
+
+        $email = $this->framework->getAdapter(Input::class)->post('email');
+
+        if (!\is_string($email) || '' === trim($email)) {
+            return $value;
+        }
+
+        $hasher = $this->passwordHasherFactory->getPasswordHasher(FrontendUser::class);
+
+        foreach (array_unique([$email, CanonicalUsername::normalize($email)]) as $candidate) {
+            if ($hasher->verify($value, $candidate)) {
+                throw new \RuntimeException($GLOBALS['TL_LANG']['ERR']['passwordName'] ?? 'The password must not be the same as the username.');
+            }
+        }
+
+        return $value;
     }
 
     #[AsHook('createNewUser')]

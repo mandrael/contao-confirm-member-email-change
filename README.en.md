@@ -158,11 +158,14 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
 - **Revocation:** a `GET` on the link shows only a confirmation page (so a mail scanner
   pre-fetching links triggers nothing); only a `POST` with Contao's usual form token actually
   performs the change – under a row lock (`SELECT ... FOR UPDATE`) and a transaction, re-checking
-  the hash, expiry, and whether the address to be restored meanwhile belongs to someone else. On
-  success: the old address is restored, the username is aligned with the restored address as
-  above, the password is invalidated (the `login` field is never touched – that stays the
-  operator's call), every unconfirmed opt-in token of the member is deleted, and a currently
-  logged-in session of that same member is logged out. If the username cannot follow the restored
+  the hash and expiry. On success: the old address is restored, the username is aligned with the
+  restored address as above (also when the switch has been turned off since, as long as the
+  username still was the replaced address), the password is invalidated (the `login` field is never
+  touched – that stays the operator's call), every unconfirmed opt-in token and every stored
+  "remember me" login of the member is deleted, and a currently logged-in session of that same
+  member is logged out. If another member meanwhile carries the address to be restored (such as a
+  never activated registration created right afterwards), it is restored anyway and the operator
+  gets a log entry about the duplicate – otherwise the revocation could be blocked that way. If the username cannot follow the restored
   address because somebody else carries it meanwhile, the revocation still goes through - address
   and password are a security function and must not fail over it; the username then stays as it is
   and the operator gets a log entry. Every failure shows the exact same generic message, regardless
@@ -175,7 +178,9 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   is harmless. When that cron runs on the CLI, `framework.router.default_uri` has to be set,
   otherwise the command line does not know the site's domain.
 - **Locking protocol:** confirmation and revocation follow the same steps - transaction, member row
-  lock (`SELECT ... FOR UPDATE`), then re-read everything freshly and with locking reads, then
+  lock (`SELECT ... FOR UPDATE`), then re-read the member and link rows freshly and with locking
+  reads (the check for an address taken elsewhere and the username eligibility are not locking
+  throughout), then
   commit link consumption, address, username, anchor and the cleanup of pending tokens together.
   Deliberately **without** a named `GET_LOCK`: a directory bundle that takes a named lock BEFORE
   this row lock would otherwise end up with the opposite lock order.

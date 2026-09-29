@@ -28,6 +28,11 @@ trait ConnectionMockTrait
     private array $statements = [];
 
     /**
+     * SQL substring whose write throws, to exercise the rollback path.
+     */
+    private string|null $failWriteOn = null;
+
+    /**
      * @param array<string, array<string, mixed>|false>   $rows    fetchAssociative: SQL substring => row or false
      * @param array<string, mixed>                        $scalars fetchOne: SQL substring => value
      * @param array<string, list<array<string, mixed>>>   $lists   fetchAllAssociative: SQL substring => list of rows
@@ -75,6 +80,10 @@ trait ConnectionMockTrait
 
         $connection->method('executeStatement')->willReturnCallback(
             function (string $sql, array $params = []): int {
+                if (null !== $this->failWriteOn && str_contains($sql, $this->failWriteOn)) {
+                    throw new \RuntimeException('write failed');
+                }
+
                 $this->log[] = 'write:'.$sql;
                 $this->statements[] = ['sql' => $sql, 'params' => $params];
 

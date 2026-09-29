@@ -204,8 +204,11 @@ class ConfirmEmailChangeController
         }
 
         // tl_member.email is DCA-unique but not DB-unique (the core allows duplicates),
-        // so the address can have been taken while this token was pending.
-        if ((int) $this->connection->fetchOne('SELECT COUNT(*) FROM tl_member WHERE email = ? AND id != ?', [$newEmail, $memberId]) > 0) {
+        // so the address can have been taken while this token was pending. A locking
+        // read on the email index: a plain SELECT would only see the transaction's
+        // snapshot, and two members confirming the same address in parallel would both
+        // pass it.
+        if (false !== $this->connection->fetchOne('SELECT id FROM tl_member WHERE email = ? AND id != ? LIMIT 1 FOR UPDATE', [$newEmail, $memberId])) {
             return $fail('taken', true);
         }
 
@@ -399,6 +402,7 @@ class ConfirmEmailChangeController
         // The URL carries the token – never cache, share or index this page.
         $response->headers->set('Cache-Control', 'private, no-store');
         $response->headers->set('X-Robots-Tag', 'noindex');
+        $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
     }

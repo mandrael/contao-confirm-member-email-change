@@ -31,6 +31,10 @@ $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorHash'] = $anchorEval
     'sql' => "char(64) BINARY NOT NULL default ''",
 ];
 
+// The public revoke route looks a member up by this hash; without an index every
+// request with a random token would scan the whole member table.
+$GLOBALS['TL_DCA']['tl_member']['config']['sql']['keys']['emailChangeAnchorHash'] = 'index';
+
 // The address the anchor restores to, i.e. the address BEFORE the confirmed change
 // that created it.
 $GLOBALS['TL_DCA']['tl_member']['fields']['emailChangeAnchorEmail'] = $anchorEval + [
