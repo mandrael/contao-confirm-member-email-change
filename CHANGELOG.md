@@ -4,6 +4,21 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Sicherheit
+- Widerruf: Ein anonymer Kennwort-Reset („Passwort vergessen“), der seinen Link vor dem Widerruf
+  geprüft hatte und erst danach speicherte, behielt das neue Kennwort des bisherigen Inhabers. Contao
+  prüft Link und Adresse vor dem Speichern und danach nicht mehr; die Sperre galt nur für angemeldete
+  Mitglieder. Der Hook `setNewPassword` entwertet das Kennwort jetzt wieder, wenn die Mitgliedszeile
+  inzwischen eine andere Adresse trägt.
+- Die Sperre überlappender Anfragen misst den Beginn einer Anfrage jetzt selbst, statt einem
+  womöglich veralteten `REQUEST_TIME` eines Worker-Betriebs zu vertrauen.
+
+### Dokumentation
+- README: Die Sperre trifft das Mitglied selbst doch, wenn es binnen 10 Sekunden nach dem Widerruf
+  schon ein neues Kennwort gesetzt und sich angemeldet hat.
+
 ## [1.2.0] - 2026-09-30
 
 Datenbank-Update nötig (`contao:migrate`): neue Tabelle `tl_member_email_revoke`. Bis dahin scheitert

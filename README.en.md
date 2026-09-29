@@ -190,8 +190,11 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   applied again under the row lock (address, username, anchor, pending tokens, credentials) if the
   request may have overlapped it (started at most 10 seconds after it, revocation at most two
   minutes old) or if the member row carries the replaced password hash again – which catches a
-  write-back even later and from any request. The member is never hit: their new password has a
-  new hash. Limits: the clocks of several web servers must stay within about 10 seconds; a
+  write-back even later and from any request. The member is only hit if they already set a new
+  password and signed in within those 10 seconds; after that, their new password has a new hash.
+  An anonymous password reset ("lost password") that checked its link before the revocation and
+  saves only after it loses the new password right away (hook `setNewPassword`: the member row
+  then carries another address than the one the reset was granted for). Limits: the clocks of several web servers must stay within about 10 seconds; a
   write-back that also re-hashes the password (a change of hashing algorithm) is only caught by the
   time window. Cost: one indexed lookup per request of a logged-in member, a second one after a
   revocation within the last 24 hours. The daily cron deletes older markers; until

@@ -201,8 +201,12 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   (Adresse, Benutzername, Anker, offene Token, Zugangsdaten), wenn die Anfrage den Widerruf
   überlappt haben kann (Beginn höchstens 10 Sekunden nach ihm, Widerruf höchstens zwei Minuten
   alt) oder wenn die Mitgliedszeile wieder den ersetzten Kennwort-Hash trägt – das erkennt ein
-  Zurückschreiben auch später und aus jeder Anfrage. Das Mitglied selbst trifft das nie: Sein neues
-  Kennwort hat einen neuen Hash. Grenzen: Uhren mehrerer Webserver dürfen höchstens etwa
+  Zurückschreiben auch später und aus jeder Anfrage. Das Mitglied selbst trifft das nur, wenn es
+  binnen dieser 10 Sekunden schon ein neues Kennwort gesetzt und sich angemeldet hat; danach hat
+  sein neues Kennwort einen neuen Hash. Ein anonymer Kennwort-Reset („Passwort vergessen“), der
+  seinen Link noch vor dem Widerruf geprüft hat und erst danach speichert, verliert das neue
+  Kennwort sofort wieder (Hook `setNewPassword`: Die Mitgliedszeile trägt dann eine andere Adresse
+  als die, für die der Reset galt). Grenzen: Uhren mehrerer Webserver dürfen höchstens etwa
   10 Sekunden auseinanderliegen; ein Zurückschreiben, das zugleich den Kennwort-Hash neu berechnet
   (Wechsel des Hash-Verfahrens), fängt nur das Zeitfenster. Kosten: je Anfrage eines angemeldeten
   Mitglieds eine Abfrage über einen Index, bei einem Widerruf in den letzten 24 Stunden eine

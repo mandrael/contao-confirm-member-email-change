@@ -4,13 +4,16 @@ declare(strict_types=1);
 
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Security;
 
+use Contao\CoreBundle\DependencyInjection\Attribute\AsHook;
 use Contao\FrontendUser;
+use Contao\MemberModel;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\EventDispatcher\Attribute\AsEventListener;
+use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
 use Symfony\Component\HttpKernel\KernelEvents;
 
@@ -27,7 +30,9 @@ use Symfony\Component\HttpKernel\KernelEvents;
  * touch): apply the revoke's outcome again under the row lock if the revoke committed
  * while the request may have been running, or if the member row carries the replaced
  * password hash again - a write-back, however late, and whichever request did it. It is
- * idempotent and never hits the rightful owner, whose new password has a new hash.
+ * idempotent; the rightful owner, whose new password has a new hash, is only hit if they
+ * set it and signed in within MARGIN seconds of the revoke. The anonymous "lost
+ * password" path is covered by onSetNewPassword().
  */
 final class RevokeFenceListener
 {
@@ -59,6 +64,57 @@ final class RevokeFenceListener
     ) {
     }
 
+    /**
+     * Request attribute with this request's own start time: a worker runtime can hand on
+     * a stale REQUEST_TIME, which would stretch the overlap to the whole WINDOW.
+     */
+    public const STARTED = '_cmec_request_started';
+
+    /**
+     * Before the firewall (8), so a login in this very request counts as started here.
+     */
+    #[AsEventListener(event: KernelEvents::REQUEST, priority: 4096)]
+    public function onRequest(RequestEvent $event): void
+    {
+        if ($event->isMainRequest()) {
+            $event->getRequest()->attributes->set(self::STARTED, time());
+        }
+    }
+
+    /**
+     * Contao's "lost password" checks token and address first and saves the new password
+     * later, anonymously, without checking again: a revoke committing in between purges
+     * the token but not the POST already past its check. The address the reset was
+     * granted for is the one the member model was loaded with; if the row carries another
+     * one now, the revoke won and the password just saved is taken away again.
+     */
+    #[AsHook('setNewPassword')]
+    public function onSetNewPassword(mixed $member): void
+    {
+        // tl_member's password save_callback (profile, backend) calls the hook with a
+        // freshly read Database\Result before saving: nothing loaded early to compare.
+        if (!$member instanceof MemberModel) {
+            return;
+        }
+
+        $memberId = (int) $member->id;
+
+        // No transaction on purpose: the core already committed the password, so a failing
+        // later step must not roll the invalidation back. No lock needed either: a revoke
+        // committing after this read locks the row after the save and invalidates it itself.
+        try {
+            $row = $this->connection->fetchAssociative('SELECT email, username, password FROM tl_member WHERE id = ?', [$memberId]);
+
+            // Only the password this reset saved: a newer one is the owner's own.
+            if (false !== $row && (string) $row['email'] !== (string) $member->email && (string) $row['password'] === (string) $member->password) {
+                $this->credentialReset->reset($memberId, [(string) $row['username'], (string) $member->username]);
+                $this->logger?->warning(\sprintf('A password reset of member ID %d was granted for an address the account no longer has (email-change revoke): the new password was invalidated.', $memberId));
+            }
+        } catch (\Throwable $e) {
+            $this->logger?->error(\sprintf('Checking a password reset of member ID %d against an email-change revoke failed with %s.', $memberId, $e::class));
+        }
+    }
+
     #[AsEventListener(event: KernelEvents::RESPONSE)]
     public function __invoke(ResponseEvent $event): void
     {
@@ -74,7 +130,8 @@ final class RevokeFenceListener
 
         $memberId = (int) $user->id;
         $now = time();
-        $started = $event->getRequest()->server->getInt('REQUEST_TIME') ?: $now;
+        $request = $event->getRequest();
+        $started = (int) ($request->attributes->get(self::STARTED) ?: $request->server->getInt('REQUEST_TIME')) ?: $now;
         $began = false;
 
         // Inside the error boundary too: on a site updated without contao:migrate yet the
