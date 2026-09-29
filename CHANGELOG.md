@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [1.2.0] - 2026-09-30
 
 Datenbank-Update nötig (`contao:migrate`): neue Tabelle `tl_member_email_revoke`. Bis dahin scheitert
 jeder Widerruf mit der allgemeinen Fehlerseite, und jede Anfrage eines angemeldeten Mitglieds loggt

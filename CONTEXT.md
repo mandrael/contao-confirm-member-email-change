@@ -1,8 +1,7 @@
 # contao-confirm-member-email-change — Kontext & Handover
 
 > **Kontext-/Handover-Dokument.** Recherche, Entscheidungen und Rationale (§1–§9) gelten weiter.
-> **Status: veröffentlicht `v1.1.2`; Nachfolger (Changelog „Unreleased“, vorgeschlagen `v1.2.0`) lokal committet,
-> nicht gepusht (30.09.2026).** Dritter Review-Durchgang (Opus 5.5, dsh, Grok) und Laufzeittest 1.1.x sind
+> **Status: veröffentlicht, aktuell `v1.2.0` (30.09.2026).** Dritter Review-Durchgang (Opus 5.5, dsh, Grok) und Laufzeittest 1.1.x sind
 > erledigt (siehe §10).
 > Aktuelle nutzerseitige Doku: `README.md` / `README.en.md` / `CHANGELOG.md`.
 > (Historie: bis 2026-06-30 reine Planungsphase; siehe §10.)
@@ -161,11 +160,11 @@ deprecation-frei schreiben → läuft unverändert auf SF 7.4.
 ## 10. Stand & nächste Schritte (Update 2026-09-30)
 
 **Veröffentlicht.** `v1.0.0` (18.09.), `v1.1.0` (21.09.: E-Mail als Benutzername, Widerrufslink an die alte
-Adresse, Crons, Konsolenbefehl), `v1.1.1` (23.09.), `v1.1.2` (29.09.). Alle als Git-Tag, CI grün.
+Adresse, Crons, Konsolenbefehl), `v1.1.1` (23.09.), `v1.1.2` (29.09.), `v1.2.0` (30.09.). Alle als Git-Tag.
 
 **Reviews.** `v1.0.0`: zwei Durchgänge (GPT, Codex gpt-5.6-sol high). `v1.0.0..v1.1.1`: Codex sol medium plus
 Fable-Tiefenreview, Ergebnis in `v1.1.2`. `v1.1.2` gesamt (29./30.09.): Opus 5.5 xhigh, dsh, Grok high, danach zwei
-Gegenprüfungen der Korrekturen (Opus high, dsh). Ergebnis im Nachfolger von `v1.1.2`: Widerruf setzt 2FA, Backup-Codes,
+Gegenprüfungen der Korrekturen (Opus high, dsh). Ergebnis in `v1.2.0`: Widerruf setzt 2FA, Backup-Codes,
 vertrauenswürdige Geräte und Passkeys zurück (`AccountCredentialReset`); `RevokeFenceListener` wendet den Widerruf auf
 überlappende Anfragen und auf Contaos Zurückschreiben der ganzen Mitgliedszeile (`User::save()`) erneut an, Vermerk
 in eigener Tabelle `tl_member_email_revoke` mit Fingerabdruck des ersetzten Kennwort-Hashes; Benutzernamen-Kollision
@@ -178,7 +177,7 @@ Bestätigung, Kettenregel, Widerruf samt 2FA/Passkeys/Remember-me, Wettlauf und 
 Zeile, Crons, Registrierung, Konsolenbefehl. Gegenprobe ohne Sperre: die Wettlauf-Prüfungen scheitern.
 
 **Offen.**
-1. Freigabe: Push und Tag (Minor wegen neuer Tabelle, vorgeschlagen `v1.2.0`).
+1. Packagist-Update für `v1.2.0` prüfen.
 2. Auf der Website nach dem Update `contao:migrate` (neue Tabelle; bis dahin scheitert jeder Widerruf).
 3. Bewusst offen, niedrig: parallele Registrierungen mit gleicher Adresse, Speicherbedarf von
    `member-email:sync-usernames`, Klartext-Widerrufslink bis 14 Tage bei dauerhaft scheiterndem Versand, sperrende
