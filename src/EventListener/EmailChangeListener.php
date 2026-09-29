@@ -18,6 +18,7 @@ use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Contracts\Service\ResetInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
@@ -28,7 +29,7 @@ use Symfony\Contracts\Translation\TranslatorInterface;
  * (terminal42/contao-mailusername, …) only ever sees the OLD email during a
  * pending change and never syncs a new username prematurely.
  */
-class EmailChangeListener
+class EmailChangeListener implements ResetInterface
 {
     /**
      * OptIn prefix (max. 6 chars, see Contao\CoreBundle\OptIn\OptIn::create()).
@@ -133,6 +134,12 @@ class EmailChangeListener
         [$memberId, $oldEmail, $newEmail] = $this->pendingChange;
         $this->pendingChange = null;
 
+        // Only the member whose field callback stashed the change (the back end calls
+        // this with a DataContainer and never stashes anything).
+        if (!$userOrDc instanceof FrontendUser || (int) $userOrDc->id !== $memberId) {
+            return;
+        }
+
         try {
             $token = $this->issueToken($memberId, $oldEmail, $newEmail);
         } catch (\Throwable $e) {
@@ -177,8 +184,9 @@ class EmailChangeListener
 
     /**
      * On the front end, replace Contao's generic "this entry already exists" unique
-     * error with an email-specific one – on the profile form the only editable unique
-     * field is the email address. The back end keeps the generic message.
+     * error with an email-specific one – unless the profile form also carries the
+     * username, the other unique field members may edit. The back end keeps the
+     * generic message.
      */
     #[AsHook('loadLanguageFile')]
     public function onLoadLanguageFile(string $name): void
@@ -201,6 +209,11 @@ class EmailChangeListener
         $formSubmit = $request->request->all()['FORM_SUBMIT'] ?? null;
 
         if (!\is_string($formSubmit) || !str_starts_with($formSubmit, 'tl_member_')) {
+            return;
+        }
+
+        // The username is a unique field too when the module lets members edit it.
+        if (\array_key_exists('username', $request->request->all())) {
             return;
         }
 
@@ -237,6 +250,15 @@ class EmailChangeListener
         $this->connection->commit();
 
         return $token;
+    }
+
+    /**
+     * A shared service: in a long-running worker, a change stashed by a submit whose
+     * later validation failed (onsubmit never ran) must not outlive its request.
+     */
+    public function reset(): void
+    {
+        $this->pendingChange = null;
     }
 
     private function notifyOldAddress(string $oldEmail, string $newEmail): void

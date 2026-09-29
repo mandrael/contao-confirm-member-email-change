@@ -19,10 +19,9 @@ class PurgeExpiredEmailChangeAnchorsCronTest extends TestCase
     public function testClearsExpiredAnchorsAndLogsWhenSomethingWasPurged(): void
     {
         $connection = $this->createMock(Connection::class);
-        $connection->expects(self::once())
+        $connection->expects(self::exactly(2))
             ->method('executeStatement')
-            ->with(self::logicalAnd(self::stringContains('emailChangeAnchorHash'), self::stringContains('emailChangeAnchorPending')), self::isArray())
-            ->willReturn(3)
+            ->willReturnCallback(static fn (string $sql): int => str_contains($sql, 'emailChangeAnchorPending') ? 3 : 0)
         ;
 
         $logger = $this->createMock(LoggerInterface::class);
@@ -34,7 +33,7 @@ class PurgeExpiredEmailChangeAnchorsCronTest extends TestCase
     public function testStaysQuietWhenNothingWasPurged(): void
     {
         $connection = $this->createMock(Connection::class);
-        $connection->expects(self::once())->method('executeStatement')->willReturn(0);
+        $connection->expects(self::exactly(2))->method('executeStatement')->willReturn(0);
 
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::never())->method('info');
@@ -53,6 +52,7 @@ class PurgeExpiredEmailChangeAnchorsCronTest extends TestCase
         $connection->executeStatement(
             'CREATE TABLE tl_member (id INTEGER, emailChangeAnchorHash TEXT, emailChangeAnchorEmail TEXT, emailChangeAnchorExpires INTEGER, emailChangeAnchorNotified INTEGER, emailChangeAnchorPending TEXT)',
         );
+        $connection->executeStatement('CREATE TABLE tl_member_email_revoke (id INTEGER, pid INTEGER, tstamp INTEGER, email TEXT, username TEXT, passwordDigest TEXT)');
 
         $now = time();
 
@@ -66,7 +66,13 @@ class PurgeExpiredEmailChangeAnchorsCronTest extends TestCase
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::once())->method('info')->with(self::stringContains('1'));
 
+        // A revoke marker past its retention goes (it carries an address), a fresh one stays.
+        $connection->insert('tl_member_email_revoke', ['id' => 1, 'pid' => 1, 'tstamp' => $now - 90000, 'email' => 'old1@example.com', 'username' => null]);
+        $connection->insert('tl_member_email_revoke', ['id' => 2, 'pid' => 2, 'tstamp' => $now, 'email' => 'old2@example.com', 'username' => null]);
+
         (new PurgeExpiredEmailChangeAnchorsCron($connection, $logger))();
+
+        self::assertSame([2], array_map('intval', $connection->fetchFirstColumn('SELECT id FROM tl_member_email_revoke')));
 
         $rows = $connection->fetchAllAssociativeIndexed('SELECT * FROM tl_member ORDER BY id');
 

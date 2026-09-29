@@ -10,6 +10,8 @@ use Contao\Email;
 use Contao\FrontendUser;
 use Contao\TestCase\ContaoTestCase;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\Exception as DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\ConfirmEmailChangeController;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
@@ -175,6 +177,56 @@ class ConfirmEmailChangeControllerTest extends ContaoTestCase
         self::assertStringContainsString('emailChangeAnchorPending = ?', $anchor['sql']);
         self::assertSame($sent[2], $anchor['params'][3], 'the plaintext is stashed for the pending-send window (Runde 2, Befund 2)');
         self::assertSame([7, 'old@example.com'], [$sent[0], $sent[1]]);
+    }
+
+    /**
+     * Without an old address nobody can receive the revoke link: an anchor would only
+     * fail its send every hour and, by the chain rule, block a real one later.
+     */
+    public function testCreatesNoAnchorForAnEmptyOldAddress(): void
+    {
+        $connection = $this->connection(memberRow: [
+            'id' => 7,
+            'email' => '',
+            'username' => 'johndoe',
+            'emailChangeAnchorHash' => '',
+            'emailChangeAnchorExpires' => 0,
+        ]);
+
+        $email = $this->createPartialMock(Email::class, ['sendTo']);
+        $email->expects(self::never())->method('sendTo');
+
+        $anchorNotice = $this->createMock(AnchorNotice::class);
+        $anchorNotice->expects(self::never())->method('send');
+
+        $response = $this->invokeController($connection, email: $email, anchorNotice: $anchorNotice);
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], $this->statementsContaining('emailChangeAnchorHash = ?'));
+    }
+
+    /**
+     * A login name taken between the eligibility check and the write (or, with
+     * terminal42/contao-mailusername, not checked at all) hits the UNIQUE index: the same
+     * answer as a rejected name, nothing committed, the link stays usable.
+     */
+    public function testALoginNameTakenAtWriteTimeShowsTheRejectedPage(): void
+    {
+        $connection = $this->connection();
+        $this->failWriteOn = 'username = ?';
+        $this->failWriteWith = new UniqueConstraintViolationException($this->createStub(DriverException::class), null);
+
+        try {
+            $response = $this->invokeController($connection, usernameChangeSync: $this->usernameChangeSync(true));
+        } finally {
+            $this->failWriteOn = null;
+            $this->failWriteWith = null;
+        }
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertStringContainsString('MSC.confirmEmailChange.usernameRejected', (string) $response->getContent());
+        self::assertContains('rollBack', $this->log);
+        self::assertNotContains('commit', $this->log);
     }
 
     /**

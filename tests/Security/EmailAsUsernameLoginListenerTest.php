@@ -8,6 +8,7 @@ use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\CoreBundle\Routing\ScopeMatcher;
 use Contao\FrontendUser;
 use Contao\TestCase\ContaoTestCase;
+use Doctrine\DBAL\Connection;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\EmailAsUsernameLoginListener;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
@@ -20,6 +21,11 @@ use Symfony\Component\Security\Http\Event\CheckPassportEvent;
 class EmailAsUsernameLoginListenerTest extends ContaoTestCase
 {
     private RequestStack $requestStack;
+
+    /**
+     * @var list<array{0: string, 1: mixed}>
+     */
+    private array $scans = [];
 
     protected function setUp(): void
     {
@@ -94,7 +100,34 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
         self::assertSame('anna@xn--mller-kva.example', $this->identifier($event));
     }
 
-    private function listener(bool $exactMatchExists = false): EmailAsUsernameLoginListener
+    /**
+     * terminal42/contao-mailusername stores the address verbatim: typing it in lower
+     * case must still find the one member carrying it in mixed case.
+     */
+    public function testFindsAStoredMixedCaseNameForACanonicalInput(): void
+    {
+        $event = $this->event('john.doe@example.com', frontend: true);
+
+        $this->listener(exactMatchExists: false, stored: ['John.Doe@example.com'])->__invoke($event);
+
+        self::assertSame('John.Doe@example.com', $this->identifier($event));
+        self::assertStringContainsString('WHERE LOWER(username) IN (?)', $this->scans[0][0] ?? '');
+        self::assertSame(['john.doe@example.com'], $this->scans[0][1] ?? null);
+    }
+
+    public function testTwoCaseVariantsFallBackToTheCanonicalForm(): void
+    {
+        $event = $this->event('JOHN@example.com', frontend: true);
+
+        $this->listener(exactMatchExists: false, stored: ['John@example.com', 'john@example.com'])->__invoke($event);
+
+        self::assertSame('john@example.com', $this->identifier($event));
+    }
+
+    /**
+     * @param list<string> $stored
+     */
+    private function listener(bool $exactMatchExists = false, array $stored = []): EmailAsUsernameLoginListener
     {
         $scopeMatcher = $this->createMock(ScopeMatcher::class);
         $scopeMatcher->method('isFrontendRequest')->willReturnCallback(
@@ -106,7 +139,16 @@ class EmailAsUsernameLoginListenerTest extends ContaoTestCase
         ]);
         $framework = $this->createContaoFrameworkMock([FrontendUser::class => $userAdapter]);
 
-        return new EmailAsUsernameLoginListener($scopeMatcher, $this->requestStack, $framework);
+        $connection = $this->createMock(Connection::class);
+        $connection->method('fetchFirstColumn')->willReturnCallback(
+            function (string $sql, array $params) use ($stored): array {
+                $this->scans[] = [$sql, $params[0]];
+
+                return $stored;
+            },
+        );
+
+        return new EmailAsUsernameLoginListener($scopeMatcher, $this->requestStack, $framework, $connection);
     }
 
     private function event(string $identifier, bool $frontend): CheckPassportEvent

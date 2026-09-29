@@ -35,6 +35,10 @@ Bestätigungslink wirksam. Schließt eine vom Contao-Kernteam selbst anerkannte 
    mit. Es folgt eine kurze Bestätigungsseite; bei aktivem E-Mail-Login wird das Mitglied
    abgemeldet und meldet sich mit der neuen Adresse neu an.
 
+Ein Kennwortwechsel über die Module „Passwort ändern“ oder „Passwort vergessen“ verwirft einen noch
+offenen Bestätigungslink: Diese Core-Module löschen alle unbestätigten Opt-in-Token des Mitglieds.
+Die Änderung ist dann im Profil neu anzufordern.
+
 ## Installation
 
 ```bash
@@ -98,9 +102,10 @@ gilt für den Login-Namen ausschließlich diese Regel:
   Mitglieder wissen, womit sie sich anmelden (nur die Beschriftung, das Formularfeld heißt
   technisch weiterhin `username`).
 - **Login mit abweichender Schreibweise:** Existiert kein Mitglied mit dem exakt eingegebenen
-  Benutzernamen, wird beim Anmelden zusätzlich die kleingeschriebene Variante gesucht (nur an der
-  öffentlichen Website, nur wenn die Eingabe ein „@“ enthält) – ein bestehender, anders
-  geschriebener Benutzername wird dabei nie verdeckt. Diese Normalisierung gilt **unabhängig vom
+  Benutzernamen, sucht die Anmeldung ein Mitglied, dessen Benutzername sich nur in der
+  Groß-/Kleinschreibung unterscheidet; gibt es genau eines, gilt sein Name, sonst die
+  kleingeschriebene Variante (nur an der öffentlichen Website, nur wenn die Eingabe ein „@“
+  enthält). Ein exakt passender Benutzername wird dabei nie verdeckt. Diese Normalisierung gilt **unabhängig vom
   Schalter**: Sobald irgendein Benutzername wie eine E-Mail-Adresse aussieht (dieser Opt-in, eine
   der Erweiterungen unten oder ein von Hand vergebener Name), soll die Anmeldung bei ihm nicht an
   der Groß-/Kleinschreibung scheitern.
@@ -133,8 +138,11 @@ dasselbe Feld):
 Ist der eigene Opt-in ausgeschaltet und keine der Erweiterungen aktiv, bleibt
 `tl_member.username` unangetastet – unverändert gegenüber 1.0.
 
-**Bekannte Grenze:** Bei **eingeschaltetem** Schalter erzwingt der `UNIQUE`-Index auf
-`tl_member.username` zusätzlich, dass zwei Mitglieder nie dieselbe E-Mail-Adresse tragen. Bei
+**Bekannte Grenze:** Bei **eingeschaltetem** Schalter verhindert der `UNIQUE`-Index auf
+`tl_member.username` in aller Regel zusätzlich, dass zwei Mitglieder dieselbe E-Mail-Adresse
+tragen – nicht bei Mitgliedern ohne Benutzernamen (etwa nach zwei gleichzeitigen Registrierungen
+mit derselben Adresse) und nicht nach einem Widerruf, der eine inzwischen doppelt vergebene
+Adresse bewusst wiederherstellt (siehe unten). Bei
 **ausgeschaltetem** Schalter (und ohne aktive Erweiterung) besteht diese Absicherung nicht: Zwei
 gleichzeitige Bestätigungen derselben, bis dahin freien Zieladresse sind nicht datenbankseitig
 ausgeschlossen – `tl_member.email` ist DCA-eindeutig, aber nicht per Datenbank-Constraint.
@@ -169,15 +177,37 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   der Schalter inzwischen aus ist, sofern der Benutzername noch die ersetzte Adresse war), Kennwort
   ungültig gemacht (kein login-Feld wird angetastet – das bleibt Betreiber-Sache), alle
   unbestätigten Opt-in-Token und alle gespeicherten „Angemeldet bleiben“-Anmeldungen des Mitglieds
-  gelöscht, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Trägt inzwischen ein
+  gelöscht, Zwei-Faktor-Einrichtung, Backup-Codes, vertrauenswürdige Geräte und Passkeys (sofern
+  die Contao-Version sie kennt) zurückgesetzt, eine gerade angemeldete Sitzung dieses Mitglieds abgemeldet. Der
+  bisherige Inhaber könnte jedes davon eingerichtet haben; das Mitglied meldet sich über „Passwort
+  vergessen“ neu an und richtet den zweiten Faktor bei Bedarf wieder ein. Trägt inzwischen ein
   anderes Mitglied die wiederherzustellende Adresse (etwa eine sofort danach angelegte, nie
   aktivierte Registrierung), wird trotzdem wiederhergestellt und der Betreiber per Log-Eintrag auf
   das Duplikat hingewiesen – sonst ließe sich der Widerruf auf diesem Weg blockieren. Kann der Benutzername
-  der wiederhergestellten Adresse nicht folgen, weil ihn inzwischen jemand anderes trägt, wird der
+  der wiederhergestellten Adresse nicht folgen, weil ihn inzwischen jemand anderes trägt (auch mit
+  terminal42/contao-mailusername oder bei einer gleichzeitigen Vergabe), wird der
   Widerruf trotzdem durchgeführt – Adresse und Kennwort sind eine Sicherheitsfunktion und dürfen
   daran nicht scheitern; der Benutzername bleibt dann stehen und der Betreiber bekommt einen
   Log-Eintrag. Jeder Fehlschlag zeigt dieselbe allgemeine Meldung, unabhängig vom Grund – auch ein
   rein technischer.
+- **Überlappende Anfragen:** Eine Anfrage des bisherigen Inhabers, die ihre Sitzungsprüfung noch
+  vor dem Widerruf bestanden hat, schreibt danach womöglich noch – ein Kennwort, ein „Angemeldet
+  bleiben“, und bei jeder Anmeldung schreibt Contao (`User::save()`) sogar die ganze vorher
+  geladene Mitgliedszeile zurück, samt alter Adresse und altem Kennwort. Per Skript im Dauerlauf
+  ist fast immer eine solche Anfrage unterwegs. Der Widerruf hinterlegt deshalb als letzten Schritt
+  einen Vermerk in einer eigenen Tabelle (`tl_member_email_revoke`, die kein Zurückschreiben
+  erreicht), samt einem Fingerabdruck des ersetzten Kennwort-Hashes. Am Ende jeder Anfrage eines
+  angemeldeten Mitglieds wird das Ergebnis des Widerrufs unter Zeilensperre erneut angewandt
+  (Adresse, Benutzername, Anker, offene Token, Zugangsdaten), wenn die Anfrage den Widerruf
+  überlappt haben kann (Beginn höchstens 10 Sekunden nach ihm, Widerruf höchstens zwei Minuten
+  alt) oder wenn die Mitgliedszeile wieder den ersetzten Kennwort-Hash trägt – das erkennt ein
+  Zurückschreiben auch später und aus jeder Anfrage. Das Mitglied selbst trifft das nie: Sein neues
+  Kennwort hat einen neuen Hash. Grenzen: Uhren mehrerer Webserver dürfen höchstens etwa
+  10 Sekunden auseinanderliegen; ein Zurückschreiben, das zugleich den Kennwort-Hash neu berechnet
+  (Wechsel des Hash-Verfahrens), fängt nur das Zeitfenster. Kosten: je Anfrage eines angemeldeten
+  Mitglieds eine Abfrage über einen Index, bei einem Widerruf in den letzten 24 Stunden eine
+  zweite. Der tägliche Cron löscht ältere Vermerke; bis `contao:migrate` gelaufen ist, loggt jede
+  solche Anfrage einen Fehler.
 - **Verlorene Benachrichtigung:** Schlägt der Versand fehl, bliebe die einzige Rückholmöglichkeit
   unbrauchbar. Deshalb wird `emailChangeAnchorNotified` erst gesetzt, wenn der Mailer die Mail
   angenommen hat (bei asynchronem Versand: an die Warteschlange übergeben – deren eigene

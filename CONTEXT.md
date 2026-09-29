@@ -1,9 +1,10 @@
 # contao-confirm-member-email-change — Kontext & Handover
 
 > **Kontext-/Handover-Dokument.** Recherche, Entscheidungen und Rationale (§1–§9) gelten weiter.
-> **Status: implementiert, auf cont5 (Contao 5.3.47) end-to-end verifiziert, nach GitHub gepusht**
-> (`dev-main`). Offen vor dem Tag: Code-Review + optionaler 5.7-Runtime-Smoke → dann `v1.0.0` + Packagist.
-> Aktuelle nutzerseitige Doku: `README.md` / `README.en.md` / `CHANGELOG.md`. Stand: 2026-07-05.
+> **Status: veröffentlicht `v1.1.2`; Nachfolger (Changelog „Unreleased“, vorgeschlagen `v1.2.0`) lokal committet,
+> nicht gepusht (30.09.2026).** Dritter Review-Durchgang (Opus 5.5, dsh, Grok) und Laufzeittest 1.1.x sind
+> erledigt (siehe §10).
+> Aktuelle nutzerseitige Doku: `README.md` / `README.en.md` / `CHANGELOG.md`.
 > (Historie: bis 2026-06-30 reine Planungsphase; siehe §10.)
 
 ## 1. Zweck & Scope
@@ -157,21 +158,32 @@ deprecation-frei schreiben → läuft unverändert auf SF 7.4.
 - Core-Code Prod 5.3.47 (ModulePersonalData/ModuleRegistration/OptIn/User) — Fundstellen §4/§5
 - Versions-Constraints: core-bundle/composer.json @ Tags 4.13.58 / Branches 5.3 / 5.7
 
-## 10. Stand & nächste Schritte (Update 2026-07-05)
+## 10. Stand & nächste Schritte (Update 2026-09-30)
 
-**Erledigt.** Bundle implementiert (AbstractBundle + Attribut-DI, `#[AsCallback]`/`#[AsController]`/`#[AsHook]`).
-Auf cont5 (Contao 5.3.47, PHP 8.3) end-to-end verifiziert — inkl. terminal42/heimrichhannot/ohne-Erweiterung,
-grüner Pending-Box, self-contained Bestätigungsseite + `Security::logout()` bei Identitätswechsel und
-E-Mail-spezifischer Unique-Meldung (FE-only). PHPUnit + PHPStan (auch gegen `core-bundle 5.7.7`) grün,
-GitHub-Actions-CI eingerichtet. Nach GitHub gepusht (`dev-main`, Commit-Identität
-`Michael Gasperl <michael@gasperl.at>`, kein Co-Author/keine Session-URL). cont5 zieht `dev-main` via VCS.
-Die relevanten `ModulePersonalData`-Interna (savedData-Flash, Raw-Message-Template, Unique-Check) sind in
-5.7.7 identisch zu 5.3 → 5.7-Runtime-Risiko gering.
+**Veröffentlicht.** `v1.0.0` (18.09.), `v1.1.0` (21.09.: E-Mail als Benutzername, Widerrufslink an die alte
+Adresse, Crons, Konsolenbefehl), `v1.1.1` (23.09.), `v1.1.2` (29.09.). Alle als Git-Tag, CI grün.
 
-**Offen vor dem Tag.**
-1. Code-Review (Fable/Codex + optional eingebautes `/code-review`) → Findings einarbeiten.
-2. Optional: 5.7-Runtime-Smoke-Test (ddev/colima).
-3. Dann `v1.0.0` taggen + bei Packagist eintragen (Empfehlung 1.0.0; konservativ 0.1.0).
+**Reviews.** `v1.0.0`: zwei Durchgänge (GPT, Codex gpt-5.6-sol high). `v1.0.0..v1.1.1`: Codex sol medium plus
+Fable-Tiefenreview, Ergebnis in `v1.1.2`. `v1.1.2` gesamt (29./30.09.): Opus 5.5 xhigh, dsh, Grok high, danach zwei
+Gegenprüfungen der Korrekturen (Opus high, dsh). Ergebnis im Nachfolger von `v1.1.2`: Widerruf setzt 2FA, Backup-Codes,
+vertrauenswürdige Geräte und Passkeys zurück (`AccountCredentialReset`); `RevokeFenceListener` wendet den Widerruf auf
+überlappende Anfragen und auf Contaos Zurückschreiben der ganzen Mitgliedszeile (`User::save()`) erneut an, Vermerk
+in eigener Tabelle `tl_member_email_revoke` mit Fingerabdruck des ersetzten Kennwort-Hashes; Benutzernamen-Kollision
+(terminal42, Race) blockiert weder Widerruf noch zeigt sie „ungültig“ bei der Bestätigung; Neuversand-Cron auf der
+CLI initialisiert das Framework; Login findet gemischt geschriebene gespeicherte Namen. Gutachten in `docs/`.
+
+**Getestet.** 148 Unit-Tests, PHPStan gegen core-bundle 5.7.9. Laufzeittest über das echte Frontend (ddev/Colima,
+Contao 5.3.51 und 5.7.13, `~/cmec-smoke/e2e.py`): 75 bzw. 76 Prüfungen grün, u. a. Login per E-Mail, Profiländerung,
+Bestätigung, Kettenregel, Widerruf samt 2FA/Passkeys/Remember-me, Wettlauf und verspätetes Zurückschreiben der
+Zeile, Crons, Registrierung, Konsolenbefehl. Gegenprobe ohne Sperre: die Wettlauf-Prüfungen scheitern.
+
+**Offen.**
+1. Freigabe: Push und Tag (Minor wegen neuer Tabelle, vorgeschlagen `v1.2.0`).
+2. Auf der Website nach dem Update `contao:migrate` (neue Tabelle; bis dahin scheitert jeder Widerruf).
+3. Bewusst offen, niedrig: parallele Registrierungen mit gleicher Adresse, Speicherbedarf von
+   `member-email:sync-usernames`, Klartext-Widerrufslink bis 14 Tage bei dauerhaft scheiterndem Versand, sperrende
+   Eindeutigkeitsprüfung nur unter `REPEATABLE READ`, Unique-Race im `UsernameSyncListener` (500), `taken`-Seite,
+   ein Zurückschreiben mit gleichzeitigem Neu-Hashen des Kennworts fängt nur das Zeitfenster.
 
 Historie (Planungsphase, bis 2026-06-30): Doku abgelegt, B1–B7 entschieden (§6), Implementierungsplan,
 dann Code. Brainstorming-Entscheidungen stehen unverändert in §6/§8.

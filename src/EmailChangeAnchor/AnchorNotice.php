@@ -45,6 +45,9 @@ class AnchorNotice
         }
 
         try {
+            // Email::__construct() needs System::getContainer(), which only initialize()
+            // sets - and a cron on the command line may be the first thing to run.
+            $this->framework->initialize();
             $email = $this->framework->createInstance(Email::class);
             $this->applySender($email);
             $email->subject = $this->trans('revokeNoticeSubject');

@@ -8,12 +8,15 @@ use Contao\CoreBundle\Csrf\ContaoCsrfTokenManager;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\TestCase\ContaoTestCase;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Driver\Exception as DriverException;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Controller\RevokeEmailChangeController;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EligibilityReason;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\EmailAsUsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernamePolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\AccountCredentialReset;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\ConnectionMockTrait;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\SecurityBundle\Security;
@@ -89,11 +92,6 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
     }
 
     /**
-     * The restored address meanwhile belongs to another member -> abort with the SAME
-     * generic message (never confirm or deny which case applies) and log only the
-     * member ID, never an email address.
-     */
-    /**
      * Whoever moved the account away can register a throwaway member with the old
      * address right afterwards. The revoke is the owner's way back and must not be
      * blockable that way: it goes through, the duplicate is logged without an address.
@@ -160,10 +158,58 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
     {
         $this->invoke($this->connection(['username' => 'compromised@example.com']), 'POST');
 
-        $update = $this->statementsContaining('UPDATE tl_member SET email')[0] ?? null;
+        $update = $this->statementsContaining('UPDATE tl_member SET username')[0] ?? null;
         self::assertNotNull($update);
-        self::assertStringContainsString('username = ?', $update['sql']);
-        self::assertSame('victim@example.com', $update['params'][1]);
+        self::assertSame('victim@example.com', $update['params'][0]);
+    }
+
+    /**
+     * rejects() does not see every collision: terminal42/contao-mailusername writes the
+     * address verbatim with the switch off, and a parallel insert can take the name after
+     * the check. The UNIQUE index then must not roll the revoke back.
+     */
+    public function testATakenLoginNameAtWriteTimeStillLetsTheRevokeGoThrough(): void
+    {
+        $connection = $this->connection(['username' => 'compromised@example.com']);
+        $this->failWriteOn = 'SET username';
+        $this->failWriteWith = new UniqueConstraintViolationException($this->createStub(DriverException::class), null);
+
+        $logger = $this->createMock(LoggerInterface::class);
+        $logger->expects(self::once())->method('error')->with(self::stringContains('member ID 7'));
+
+        try {
+            $response = $this->invoke($connection, 'POST', $logger);
+        } finally {
+            $this->failWriteOn = null;
+            $this->failWriteWith = null;
+        }
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertContains('commit', $this->log);
+        self::assertSame(['compromised@example.com'], $this->statementsContaining('DELETE FROM rememberme_token')[0]['params'][0] ?? null);
+    }
+
+    /**
+     * Whoever held the account could have set up two-factor login, trusted devices or a
+     * passkey; none of them may survive the revoke.
+     */
+    public function testRevokeResetsTwoFactorAndPasskeys(): void
+    {
+        $this->invoke($this->connection(), 'POST');
+
+        $reset = $this->statementsContaining('UPDATE tl_member SET password')[0] ?? null;
+        self::assertNotNull($reset);
+        self::assertStringStartsWith('invalidated$', $reset['params'][0]);
+        self::assertStringContainsString('useTwoFactor = 0', $reset['sql']);
+        self::assertStringContainsString('secret = NULL', $reset['sql']);
+        self::assertStringContainsString('backupCodes = NULL', $reset['sql']);
+        self::assertStringContainsString('trustedTokenVersion = trustedTokenVersion + 1', $reset['sql']);
+
+        if (class_exists(\Contao\CoreBundle\Entity\WebauthnCredential::class)) {
+            self::assertSame(['frontend.7'], $this->statementsContaining('DELETE FROM webauthn_credentials')[0]['params'] ?? null);
+        }
+
+        self::assertLessThan(array_search('commit', $this->log, true), array_search('write:'.$reset['sql'], $this->log, true));
     }
 
     public function testSuccessfulRevokeRestoresTheOldAddressAndInvalidatesThePassword(): void
@@ -179,10 +225,23 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
         $update = $this->statementsContaining('UPDATE tl_member SET email')[0] ?? null;
         self::assertNotNull($update);
         self::assertSame('victim@example.com', $update['params'][0]);
-        self::assertStringContainsString('password = ?', $update['sql']);
         self::assertStringContainsString("emailChangeAnchorExpires = 0", $update['sql']);
-        self::assertNotSame('', $update['params'][1], 'the password must be overwritten, never left empty');
         self::assertStringContainsString('emailChangeAnchorPending = ?', $update['sql'], 'the spent plaintext must be cleared, not just the hash');
+
+        // The fence marker is the last write before the commit and names the outcome.
+        $marker = $this->statementsContaining('INSERT INTO tl_member_email_revoke')[0] ?? null;
+        self::assertNotNull($marker);
+        self::assertSame(7, $marker['params'][0]);
+        self::assertSame('victim@example.com', $marker['params'][2]);
+        self::assertSame('johndoe', $marker['params'][3], 'the login name the revoke left');
+        self::assertSame(hash('sha256', 'attacker-hash'), $marker['params'][4], 'the replaced password hash, for a late write-back');
+        self::assertStringContainsString('ON DUPLICATE KEY UPDATE', $marker['sql']);
+        $writes = array_values(array_filter($this->log, static fn (string $e): bool => str_starts_with($e, 'write:')));
+        self::assertStringContainsString('INSERT INTO tl_member_email_revoke', end($writes));
+
+        $password = $this->statementsContaining('UPDATE tl_member SET password')[0] ?? null;
+        self::assertNotNull($password);
+        self::assertStringStartsWith('invalidated$', $password['params'][0], 'the password must be overwritten, never left empty');
     }
 
     /**
@@ -207,7 +266,7 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
 
         $update = $this->statementsContaining('UPDATE tl_member SET email')[0] ?? null;
         self::assertNotNull($update);
-        self::assertStringNotContainsString('username = ?', $update['sql'], 'the login name stays as it is');
+        self::assertSame([], $this->statementsContaining('SET username'), 'the login name stays as it is');
         self::assertSame('victim@example.com', $update['params'][0]);
     }
 
@@ -242,6 +301,7 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
             'id' => 7,
             'email' => 'compromised@example.com',
             'username' => 'johndoe',
+            'password' => 'attacker-hash',
             'emailChangeAnchorHash' => hash('sha256', self::TOKEN),
             'emailChangeAnchorEmail' => 'victim@example.com',
             'emailChangeAnchorExpires' => time() + 3600,
@@ -294,6 +354,7 @@ class RevokeEmailChangeControllerTest extends ContaoTestCase
             $translator,
             $requestStack,
             $csrfTokenManager,
+            new AccountCredentialReset($connection),
             $logger,
         );
 

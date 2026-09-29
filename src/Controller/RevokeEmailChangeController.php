@@ -8,11 +8,13 @@ use Contao\CoreBundle\ContaoCoreBundle;
 use Contao\CoreBundle\Csrf\ContaoCsrfTokenManager;
 use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\FrontendUser;
-use Doctrine\DBAL\ArrayParameterType;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\OptIn\UnconfirmedTokenPurger;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\AccountCredentialReset;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\RevokeFenceListener;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\SecurityBundle\Security;
 use Symfony\Component\HttpFoundation\Request;
@@ -47,6 +49,7 @@ class RevokeEmailChangeController
         private readonly TranslatorInterface $translator,
         private readonly RequestStack $requestStack,
         private readonly ContaoCsrfTokenManager $csrfTokenManager,
+        private readonly AccountCredentialReset $credentialReset,
         private readonly LoggerInterface|null $logger = null,
     ) {
     }
@@ -176,7 +179,7 @@ class RevokeEmailChangeController
         $this->connection->beginTransaction();
 
         $row = $this->connection->fetchAssociative(
-            'SELECT id, email, username, emailChangeAnchorHash, emailChangeAnchorEmail, emailChangeAnchorExpires FROM tl_member WHERE id = ? FOR UPDATE',
+            'SELECT id, email, username, password, emailChangeAnchorHash, emailChangeAnchorEmail, emailChangeAnchorExpires FROM tl_member WHERE id = ? FOR UPDATE',
             [$memberId],
         );
 
@@ -227,20 +230,26 @@ class RevokeEmailChangeController
             $this->logger?->error(\sprintf('Email-change revoke for member ID %d kept the previous login name: the restored address is not eligible as one. Please correct it manually.', $memberId));
         }
 
-        // tl_member.username carries a UNIQUE index and is nullable, so it is only ever
-        // written with a real value, never blanked back to an empty string.
         // emailChangeAnchorPending is cleared alongside the hash - the plaintext it
         // stashed for the pending-send window is spent once consumed.
+        $this->connection->executeStatement(
+            'UPDATE tl_member SET email = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',
+            [$restoredEmail, '', '', '', time(), $memberId],
+        );
+
+        // tl_member.username carries a UNIQUE index and is nullable, so it is only ever
+        // written with a real value, never blanked back to an empty string. rejects()
+        // does not cover every collision (terminal42/contao-mailusername writes the
+        // address verbatim with the switch off, and a parallel insert can take the name
+        // after the check): a taken name keeps the previous one, like the rejects()
+        // branch above. MySQL rolls back only the failed statement, not the transaction.
         if (null !== $newUsername && '' !== $newUsername && $newUsername !== $oldUsername) {
-            $this->connection->executeStatement(
-                'UPDATE tl_member SET email = ?, username = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',
-                [$restoredEmail, $newUsername, $this->invalidatedPasswordHash(), '', '', '', time(), $memberId],
-            );
-        } else {
-            $this->connection->executeStatement(
-                'UPDATE tl_member SET email = ?, password = ?, emailChangeAnchorHash = ?, emailChangeAnchorEmail = ?, emailChangeAnchorExpires = 0, emailChangeAnchorNotified = 0, emailChangeAnchorPending = ?, tstamp = ? WHERE id = ?',
-                [$restoredEmail, $this->invalidatedPasswordHash(), '', '', '', time(), $memberId],
-            );
+            try {
+                $this->connection->executeStatement('UPDATE tl_member SET username = ? WHERE id = ?', [$newUsername, $memberId]);
+            } catch (UniqueConstraintViolationException) {
+                $newUsername = null;
+                $this->logger?->error(\sprintf('Email-change revoke for member ID %d kept the previous login name: another member carries the restored one. Please correct it manually.', $memberId));
+            }
         }
 
         // The account just changed hands (back) – kill whatever password-reset /
@@ -248,50 +257,23 @@ class RevokeEmailChangeController
         // anchor. Contao's Model layer uses this very connection (core Database.php:64-66),
         // so these deletes are part of the same transaction.
         $this->tokenPurger->purgeAll($memberId);
-        $this->purgeRememberMeTokens($oldUsername, $newUsername);
+        $this->credentialReset->reset($memberId, [$oldUsername, $newUsername]);
+
+        // Last statement before the commit, so its time is as close to the commit as it
+        // gets: RevokeFenceListener applies this outcome again to requests of the previous
+        // holder that were already running. An upsert on the unique pid rather than
+        // DELETE + INSERT: two revokes on an empty table would otherwise deadlock on the
+        // gap locks. Old rows go with the daily purge cron.
+        $finalUsername = null !== $newUsername && '' !== $newUsername ? $newUsername : ('' !== $oldUsername ? $oldUsername : null);
+        $marker = [time(), $restoredEmail, $finalUsername, RevokeFenceListener::passwordDigest($row['password'] ?? null)];
+        $this->connection->executeStatement(
+            'INSERT INTO tl_member_email_revoke (pid, tstamp, email, username, passwordDigest) VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE tstamp = ?, email = ?, username = ?, passwordDigest = ?',
+            [$memberId, ...$marker, ...$marker],
+        );
 
         $this->connection->commit();
 
         return $memberId;
-    }
-
-    /**
-     * Not a hash format any of Contao's chained password hashers (native → sodium →
-     * pbkdf2/message-digest, see Symfony's MigratingPasswordHasher behind the "auto"
-     * password_hashers config) recognizes, so every ->verify() call in the chain
-     * safely returns false instead of throwing (confirmed against
-     * NativePasswordHasher::verify() and SodiumPasswordHasher::verify(), both fall
-     * back to a plain password_verify() for a non-"$argon"/"$2" string, which PHP
-     * itself defines as returning false for an unrecognized hash). Login by password
-     * becomes impossible without touching tl_member.login, which stays operator-owned.
-     */
-    /**
-     * The replaced password ends every session (Contao User::isEqualTo() compares it),
-     * but not a persistent remember-me cookie: Symfony 6.4's PersistentRememberMeHandler
-     * reloads the user by identifier without looking at the password, so whoever held
-     * the account could sign straight back in. Drop every stored series for the login
-     * names involved. No error boundary of its own: a revoke that leaves these logins
-     * alive is no revoke, so a failure here rolls the whole transaction back and the
-     * owner can simply try again.
-     */
-    private function purgeRememberMeTokens(string $oldUsername, ?string $newUsername): void
-    {
-        $usernames = array_values(array_unique(array_filter([$oldUsername, (string) $newUsername], static fn (string $u): bool => '' !== $u)));
-
-        if ([] === $usernames) {
-            return;
-        }
-
-        $this->connection->executeStatement(
-            'DELETE FROM rememberme_token WHERE username IN (?)',
-            [$usernames],
-            [ArrayParameterType::STRING],
-        );
-    }
-
-    private function invalidatedPasswordHash(): string
-    {
-        return 'invalidated$'.bin2hex(random_bytes(32));
     }
 
     private function invalidPage(): Response

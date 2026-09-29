@@ -11,7 +11,7 @@ $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['subject'] = 'Bitte bestätigen
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['text'] = "Sie haben für Ihr Konto eine neue E-Mail-Adresse angegeben.\n\nBitte bestätigen Sie die Änderung, indem Sie diesen Link öffnen:\n\n%s\n\nDer Link ist 24 Stunden gültig. Bis zur Bestätigung bleibt Ihre bisherige Adresse aktiv. Falls Sie das nicht waren, ignorieren Sie diese E-Mail.";
 
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['noticeSubject'] = 'Änderung Ihrer E-Mail-Adresse angefordert';
-$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['noticeText'] = "Für Ihr Konto wurde eine Änderung der E-Mail-Adresse auf %s angefordert.\n\nDie Änderung wird erst wirksam, wenn sie über den an die neue Adresse gesendeten Link bestätigt wird. Falls Sie das nicht veranlasst haben, ist keine Aktion nötig – Ihre bisherige Adresse bleibt unverändert.";
+$GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['noticeText'] = "Für Ihr Konto wurde eine Änderung der E-Mail-Adresse auf %s angefordert.\n\nDie Änderung wird erst wirksam, wenn sie über den an die neue Adresse gesendeten Link bestätigt wird. Falls Sie das nicht veranlasst haben, ändern Sie bitte umgehend Ihr Passwort: Dann hat möglicherweise jemand Zugriff auf Ihr Konto. Wird die Änderung bestätigt, erhalten Sie an diese Adresse eine weitere Nachricht, in der Regel mit einem Link, mit dem Sie die Änderung 14 Tage lang rückgängig machen können.";
 
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['pending'] = 'Wir haben einen Bestätigungslink an %s gesendet. Ihre E-Mail-Adresse wird erst nach dem Klick auf den Link geändert.';
 $GLOBALS['TL_LANG']['MSC']['confirmEmailChange']['success'] = 'Ihre neue E-Mail-Adresse wurde bestätigt und ist nun aktiv.';

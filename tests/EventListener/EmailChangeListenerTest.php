@@ -105,6 +105,25 @@ class EmailChangeListenerTest extends TestCase
     }
 
     /**
+     * The listener is a shared service: a change stashed for one member must never be
+     * issued in the onsubmit of another (long-running worker, failed validation between
+     * the two callbacks), and reset() drops it between requests.
+     */
+    public function testAStashedChangeIsIssuedOnlyForItsOwnMember(): void
+    {
+        $optIn = $this->createMock(OptIn::class);
+        $optIn->expects(self::never())->method('create');
+
+        $listener = $this->listener($optIn);
+        $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
+        $listener->onSubmit($this->frontendUser('other@example.com', 8));
+
+        $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
+        $listener->reset();
+        $listener->onSubmit($this->frontendUser('old@example.com', 7));
+    }
+
+    /**
      * DeepSeek W-4 (Runde 2): ModulePersonalData calls onsubmit_callbacks with no
      * try/catch of its own - a mail failure (typically: no effective administrator
      * address) must not escape onSubmit() as an uncaught exception. The confirmation
@@ -130,7 +149,7 @@ class EmailChangeListenerTest extends TestCase
         $listener = $this->listener($optIn, $framework, $logger);
         $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
 
-        $listener->onSubmit();
+        $listener->onSubmit($this->frontendUser('old@example.com', 7));
     }
 
     public function testALostOldAddressNoticeDoesNotPreventTheConfirmationSend(): void
@@ -156,7 +175,7 @@ class EmailChangeListenerTest extends TestCase
         $listener = $this->listener($optIn, $framework, $logger);
         $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
 
-        $listener->onSubmit();
+        $listener->onSubmit($this->frontendUser('old@example.com', 7));
     }
 
     /**
@@ -252,7 +271,7 @@ class EmailChangeListenerTest extends TestCase
 
         $listener = $this->listener($optIn, $framework, connection: $connection, purger: $purger);
         $listener->onSaveEmail('new@example.com', $this->frontendUser('old@example.com', 7), $this->createStub(ModulePersonalData::class));
-        $listener->onSubmit();
+        $listener->onSubmit($this->frontendUser('old@example.com', 7));
 
         self::assertSame('begin', $this->log[0]);
         self::assertStringContainsString('FOR UPDATE', $this->log[1]);

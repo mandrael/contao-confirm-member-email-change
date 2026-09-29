@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Tests\EmailChangeAnchor;
 
 use Contao\CoreBundle\Framework\Adapter;
+use Contao\CoreBundle\Framework\ContaoFramework;
 use Contao\Email;
 use Contao\StringUtil;
 use Contao\TestCase\ContaoTestCase;
@@ -42,6 +43,29 @@ class AnchorNoticeTest extends ContaoTestCase
         self::assertStringContainsString('emailChangeAnchorNotified = 1', $statements[0][0]);
         self::assertStringContainsString("emailChangeAnchorPending = ''", $statements[0][0], 'the stashed plaintext must be cleared once the mail is out');
         self::assertSame([7, hash('sha256', self::TOKEN)], $statements[0][1]);
+    }
+
+    /**
+     * Email::__construct() needs System::getContainer(), which only initialize() sets:
+     * on the command line the resend cron may be the first thing that runs (found in
+     * the ddev runtime test, 5.3 and 5.7).
+     */
+    public function testInitializesTheFrameworkBeforeCreatingTheMail(): void
+    {
+        $calls = [];
+        $framework = $this->createMock(ContaoFramework::class);
+        $framework->method('initialize')->willReturnCallback(static function () use (&$calls): void { $calls[] = 'initialize'; });
+        $framework->method('createInstance')->willReturnCallback(static function () use (&$calls): never {
+            $calls[] = 'createInstance';
+
+            throw new \RuntimeException('stop here');
+        });
+
+        $translator = $this->createStub(TranslatorInterface::class);
+        $notice = new AnchorNotice($framework, $this->createStub(Connection::class), $translator, $this->createStub(UrlGeneratorInterface::class));
+
+        self::assertFalse($notice->send(7, 'old@example.com', self::TOKEN));
+        self::assertSame(['initialize', 'createInstance'], $calls);
     }
 
     public function testAFailedSendLeavesTheAnchorUnnotified(): void

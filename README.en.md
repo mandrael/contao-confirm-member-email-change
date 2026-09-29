@@ -35,6 +35,10 @@ a confirmation link. Closes a gap acknowledged by the Contao core team itself
    page follows; with an email login active the member is logged out and signs back in with the
    new address.
 
+Changing the password via the "change password" or "lost password" modules discards a still open
+confirmation link: these core modules delete every unconfirmed opt-in token of the member. The
+change then has to be requested again in the profile.
+
 ## Installation
 
 ```bash
@@ -93,9 +97,10 @@ governs the login name:
   as an editable field from before the switch was turned on.
 - **Login form:** shows "Email address" instead of "Username" as the label, so members know what
   to log in with (label only, the form field is technically still named `username`).
-- **Login with a different case:** if no member carries the exact typed username, the login also
-  tries the lowercased variant (public site only, only when the input contains an "@") – an
-  existing, differently-cased username is never shadowed by this. This normalization applies
+- **Login with a different case:** if no member carries the exact typed username, the login looks
+  for a member whose username differs only in case; if there is exactly one, its name is used,
+  otherwise the lowercased variant (public site only, only when the input contains an "@"). An
+  exactly matching username is never shadowed by this. This normalization applies
   **regardless of the switch**: as soon as any username looks like an email address (this opt-in,
   one of the extensions below, or a manually assigned name), login should not fail on case alone.
 - **Existing members with a different username** are corrected automatically the next time they
@@ -127,8 +132,10 @@ Either the built-in opt-in above **or** one of the following extensions – not 
 With the built-in opt-in off and neither extension active, `tl_member.username` is left
 untouched – unchanged from 1.0.
 
-**Known limitation:** with the switch **on**, the `UNIQUE` index on `tl_member.username`
-additionally guarantees that no two members ever carry the same email address. With the switch
+**Known limitation:** with the switch **on**, the `UNIQUE` index on `tl_member.username` as a
+rule also keeps two members from carrying the same email address – not for members without a
+username (such as after two simultaneous registrations with the same address) and not after a
+revocation that deliberately restores an address carried twice meanwhile (see below). With the switch
 **off** (and no extension active), that guarantee does not exist: two simultaneous confirmations
 of the same, previously free target address are not excluded at the database level -
 `tl_member.email` is unique by DCA rule, not by a database constraint.
@@ -162,14 +169,33 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   restored address as above (also when the switch has been turned off since, as long as the
   username still was the replaced address), the password is invalidated (the `login` field is never
   touched – that stays the operator's call), every unconfirmed opt-in token and every stored
-  "remember me" login of the member is deleted, and a currently logged-in session of that same
-  member is logged out. If another member meanwhile carries the address to be restored (such as a
+  "remember me" login of the member is deleted, two-factor setup, backup codes, trusted devices and
+  passkeys (where the Contao version has them) are reset, and a currently logged-in session of that same member is
+  logged out. The previous holder could have set up any of them; the member signs back in via
+  "lost password" and sets up the second factor again if needed. If another member meanwhile carries the address to be restored (such as a
   never activated registration created right afterwards), it is restored anyway and the operator
   gets a log entry about the duplicate – otherwise the revocation could be blocked that way. If the username cannot follow the restored
-  address because somebody else carries it meanwhile, the revocation still goes through - address
+  address because somebody else carries it meanwhile (also with terminal42/contao-mailusername or
+  on a simultaneous assignment), the revocation still goes through - address
   and password are a security function and must not fail over it; the username then stays as it is
   and the operator gets a log entry. Every failure shows the exact same generic message, regardless
   of the reason - a purely technical one included.
+- **Overlapping requests:** a request of the previous holder that passed its session check just
+  before the revocation may still write afterwards – a password, a "remember me" login, and on
+  every login Contao (`User::save()`) even writes back the whole member row it loaded before,
+  old address and old password included. Scripted back to back, such a request is nearly always in
+  flight. As its last step, the revocation therefore leaves a marker in a table of its own
+  (`tl_member_email_revoke`, out of reach of any write-back), with a fingerprint of the replaced
+  password hash. At the end of every request of a logged-in member, the revocation's outcome is
+  applied again under the row lock (address, username, anchor, pending tokens, credentials) if the
+  request may have overlapped it (started at most 10 seconds after it, revocation at most two
+  minutes old) or if the member row carries the replaced password hash again – which catches a
+  write-back even later and from any request. The member is never hit: their new password has a
+  new hash. Limits: the clocks of several web servers must stay within about 10 seconds; a
+  write-back that also re-hashes the password (a change of hashing algorithm) is only caught by the
+  time window. Cost: one indexed lookup per request of a logged-in member, a second one after a
+  revocation within the last 24 hours. The daily cron deletes older markers; until
+  `contao:migrate` has run, every such request logs an error.
 - **A lost notice:** a failed send would leave the only way back unusable, so
   `emailChangeAnchorNotified` is set only once the mailer accepted the mail (with an
   asynchronous transport: handed over to the queue, whose own retries are the transport's business); an hourly cron re-sends

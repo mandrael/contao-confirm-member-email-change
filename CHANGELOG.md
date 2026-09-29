@@ -4,6 +4,49 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+Datenbank-Update nötig (`contao:migrate`): neue Tabelle `tl_member_email_revoke`. Bis dahin scheitert
+jeder Widerruf mit der allgemeinen Fehlerseite, und jede Anfrage eines angemeldeten Mitglieds loggt
+einen Fehler.
+
+### Sicherheit
+- Widerruf: setzt jetzt auch Zwei-Faktor-Einrichtung, Backup-Codes, vertrauenswürdige Geräte und
+  Passkeys (sofern die Contao-Version sie kennt) zurück. Ein Passkey, den der bisherige Inhaber angelegt hatte, meldete ihn
+  sonst ohne Kennwort wieder an; ein von ihm eingerichteter zweiter Faktor sperrte das Mitglied aus.
+- Widerruf: Eine Anfrage des bisherigen Inhabers, die ihre Sitzungsprüfung vor dem Widerruf
+  bestanden hatte, konnte ihn danach aufheben: mit einem neuen Kennwort, einem „Angemeldet
+  bleiben“ oder – bei jeder Anmeldung – über Contaos `User::save()`, das die vorher geladene
+  Mitgliedszeile vollständig zurückschreibt. Ein Vermerk in `tl_member_email_revoke` (Zeitpunkt und
+  Fingerabdruck des ersetzten Kennwort-Hashes) lässt das Ergebnis des Widerrufs jetzt am Ende jeder
+  überlappenden Anfrage und bei jedem späteren Zurückschreiben erneut anwenden.
+- Login mit abweichender Schreibweise: läuft erst nach Login-Drosselung und CSRF-Prüfung und sucht
+  zuerst über den Index; die Suche ohne Index nur, wenn das nichts findet.
+- Widerruf: Ist der Benutzername der wiederhergestellten Adresse vergeben (mit
+  terminal42/contao-mailusername oder bei gleichzeitiger Vergabe), bleibt der bisherige stehen,
+  statt den ganzen Widerruf am `UNIQUE`-Index scheitern zu lassen.
+- Der Hinweis an die alte Adresse riet bei einer nicht selbst veranlassten Änderung zu „keine
+  Aktion nötig“. Er rät jetzt, das Kennwort zu ändern, und kündigt den Widerrufslink an.
+
+### Behoben
+- Der stündliche Neuversand des Widerrufslinks scheiterte auf der Kommandozeile (`contao:cron`),
+  wenn kein anderer Cronjob das Contao-Framework vorher gestartet hatte. Gefunden im
+  ddev-Laufzeittest auf 5.3 und 5.7.
+- Login mit abweichender Schreibweise findet jetzt auch einen gespeicherten Benutzernamen in
+  gemischter Schreibweise (terminal42/contao-mailusername übernimmt die Adresse unverändert).
+- Bestätigung: Ein beim Schreiben vergebener Benutzername zeigt die Seite „als Benutzername nicht
+  verwendbar“ statt „ungültig“; der Link bleibt wie dort unverbraucht.
+- Bestätigung: Für eine leere alte Adresse entsteht kein Sicherheitsanker mehr, der nur
+  stündlich am Versand scheitern und einen späteren echten Anker blockieren würde.
+- Profil: Die E-Mail-spezifische Meldung „existiert bereits“ ersetzt die allgemeine nicht mehr,
+  wenn das Formular auch den Benutzernamen enthält.
+- Eine im Profil angemeldete, aber nicht ausgestellte Änderung bleibt in langlebigen
+  PHP-Prozessen (Worker) nicht mehr im Dienst hängen und wird nur für das eigene Mitglied
+  ausgestellt.
+- README: Die Aussage, bei eingeschaltetem Schalter trügen zwei Mitglieder nie dieselbe Adresse,
+  ist eingeschränkt; der Verlust eines offenen Bestätigungslinks durch „Passwort ändern“ oder
+  „Passwort vergessen“ ist dokumentiert.
+
 ## [1.1.2] - 2026-09-29
 
 ### Behoben

@@ -13,6 +13,7 @@ use Contao\CoreBundle\OptIn\OptInTokenNoLongerValidException;
 use Contao\Email;
 use Contao\FrontendUser;
 use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailAsUsername\UsernameChangeSync;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\AnchorNotice;
 use Mandrael\ContaoConfirmMemberEmailChangeBundle\EmailChangeAnchor\EmailChangeAnchorPolicy;
@@ -100,6 +101,13 @@ class ConfirmEmailChangeController
             // technical failure looking like a half-applied change.
             if ($this->connection->isTransactionActive()) {
                 $this->connection->rollBack();
+            }
+
+            // A login name taken between the eligibility check and the write (or, with
+            // terminal42/contao-mailusername, never checked at all) - the same answer as
+            // a rejected one, and the link stays unused just like there.
+            if ($e instanceof UniqueConstraintViolationException) {
+                return $this->page('usernameRejected', true);
             }
 
             $this->logger?->error(\sprintf('Email change confirmation for member ID %d failed with %s.', $memberId, $e::class));
@@ -255,9 +263,11 @@ class ConfirmEmailChangeController
         // erase the real owner's way back in. Under the row lock this holds for two
         // parallel confirmations as well: the second one reads the anchor the first one
         // committed.
+        // Without an old address there is nobody to send the link to: an anchor would
+        // only fail its send every hour and, by the chain rule, block a real one.
         $revokeToken = null;
 
-        if (!EmailChangeAnchorPolicy::hasValidAnchor((string) $member['emailChangeAnchorHash'], (int) $member['emailChangeAnchorExpires'], time())) {
+        if ('' !== trim($oldEmail) && !EmailChangeAnchorPolicy::hasValidAnchor((string) $member['emailChangeAnchorHash'], (int) $member['emailChangeAnchorExpires'], time())) {
             $revokeToken = bin2hex(random_bytes(32));
 
             // emailChangeAnchorNotified stays 0 until the link really went out, see
@@ -296,7 +306,7 @@ class ConfirmEmailChangeController
             if (null !== $outcome['revokeToken']) {
                 // AnchorNotice keeps emailChangeAnchorNotified at 0 if the mail fails.
                 $this->anchorNotice->send($memberId, $outcome['oldEmail'], $outcome['revokeToken']);
-            } else {
+            } elseif ('' !== trim($outcome['oldEmail'])) {
                 $this->notifyChainedAnchor($outcome['oldEmail']);
             }
         } catch (\Throwable $e) {

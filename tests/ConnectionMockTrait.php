@@ -33,6 +33,11 @@ trait ConnectionMockTrait
     private string|null $failWriteOn = null;
 
     /**
+     * What the failing write throws; a generic RuntimeException unless set.
+     */
+    private \Throwable|null $failWriteWith = null;
+
+    /**
      * @param array<string, array<string, mixed>|false>   $rows    fetchAssociative: SQL substring => row or false
      * @param array<string, mixed>                        $scalars fetchOne: SQL substring => value
      * @param array<string, list<array<string, mixed>>>   $lists   fetchAllAssociative: SQL substring => list of rows
@@ -81,7 +86,7 @@ trait ConnectionMockTrait
         $connection->method('executeStatement')->willReturnCallback(
             function (string $sql, array $params = []): int {
                 if (null !== $this->failWriteOn && str_contains($sql, $this->failWriteOn)) {
-                    throw new \RuntimeException('write failed');
+                    throw $this->failWriteWith ?? new \RuntimeException('write failed');
                 }
 
                 $this->log[] = 'write:'.$sql;

@@ -39,7 +39,11 @@ final class RawSqlAgainstSchemaTest extends TestCase
             'id', 'tstamp', 'email', 'username', 'password', 'login',
             'emailChangeAnchorHash', 'emailChangeAnchorEmail', 'emailChangeAnchorExpires',
             'emailChangeAnchorNotified', 'emailChangeAnchorPending',
+            'useTwoFactor', 'secret', 'backupCodes', 'trustedTokenVersion',
         ],
+        'rememberme_token' => ['series', 'value', 'lastUsed', 'class', 'username'],
+        'webauthn_credentials' => ['id', 'userHandle'],
+        'tl_member_email_revoke' => ['id', 'pid', 'tstamp', 'email', 'username', 'passwordDigest'],
         'tl_undo' => ['id', 'pid', 'tstamp', 'fromTable', 'query', 'affectedRows', 'data'],
         // AnchorNotice::applySender() root-page administrator-address fallback.
         'tl_page' => ['id', 'type', 'adminEmail', 'sorting'],
@@ -130,6 +134,7 @@ final class RawSqlAgainstSchemaTest extends TestCase
     private function forSqlite(string $sql): string
     {
         $sql = preg_replace('/\s+FOR\s+UPDATE\s*$/i', '', $sql);
+        $sql = preg_replace('/\bON DUPLICATE KEY UPDATE\b/i', 'ON CONFLICT DO UPDATE SET', (string) $sql);
 
         return preg_replace('/\bBINARY\s+/i', '', (string) $sql);
     }

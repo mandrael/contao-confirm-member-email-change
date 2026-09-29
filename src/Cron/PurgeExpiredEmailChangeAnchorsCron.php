@@ -6,6 +6,7 @@ namespace Mandrael\ContaoConfirmMemberEmailChangeBundle\Cron;
 
 use Contao\CoreBundle\DependencyInjection\Attribute\AsCronJob;
 use Doctrine\DBAL\Connection;
+use Mandrael\ContaoConfirmMemberEmailChangeBundle\Security\RevokeFenceListener;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -34,5 +35,8 @@ class PurgeExpiredEmailChangeAnchorsCron
         if ($affected > 0) {
             $this->logger?->info(\sprintf('Purged %d expired email-change security anchor(s)', $affected));
         }
+
+        // Revoke markers only matter for RevokeFenceListener::RETENTION seconds and carry an address.
+        $this->connection->executeStatement('DELETE FROM tl_member_email_revoke WHERE tstamp < ?', [time() - RevokeFenceListener::RETENTION]);
     }
 }
