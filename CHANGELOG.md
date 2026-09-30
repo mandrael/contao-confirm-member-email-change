@@ -4,7 +4,7 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [1.2.1] - 2026-09-30
 
 ### Sicherheit
 - Widerruf: Ein anonymer Kennwort-Reset („Passwort vergessen“), der seinen Link vor dem Widerruf
