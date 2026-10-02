@@ -194,7 +194,10 @@ nothing more than a consequence-free notice. So a **confirmed** change now also 
   password and signed in within those 10 seconds; after that, their new password has a new hash.
   An anonymous password reset ("lost password") that checked its link before the revocation and
   saves only after it loses the new password right away (hook `setNewPassword`: the member row
-  then carries another address than the one the reset was granted for). Limits: the clocks of several web servers must stay within about 10 seconds; a
+  then carries another address than the one the reset was granted for, and still the password it
+  saved; a password the member has set meanwhile stays). If Contao fails with an error after saving
+  and before the hook, this does not apply. Limits: the clocks of several web servers must stay
+  within about 10 seconds; a
   write-back that also re-hashes the password (a change of hashing algorithm) is only caught by the
   time window. Cost: one indexed lookup per request of a logged-in member, a second one after a
   revocation within the last 24 hours. The daily cron deletes older markers; until

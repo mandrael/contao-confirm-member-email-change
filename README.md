@@ -206,7 +206,9 @@ Link, der die Änderung 14 Tage lang rückgängig machen kann.
   sein neues Kennwort einen neuen Hash. Ein anonymer Kennwort-Reset („Passwort vergessen“), der
   seinen Link noch vor dem Widerruf geprüft hat und erst danach speichert, verliert das neue
   Kennwort sofort wieder (Hook `setNewPassword`: Die Mitgliedszeile trägt dann eine andere Adresse
-  als die, für die der Reset galt). Grenzen: Uhren mehrerer Webserver dürfen höchstens etwa
+  als die, für die der Reset galt, und noch das von ihm gespeicherte Kennwort; ein inzwischen
+  gesetztes Kennwort des Mitglieds bleibt). Bricht Contao nach dem Speichern und vor dem Hook mit
+  einem Fehler ab, greift das nicht. Grenzen: Uhren mehrerer Webserver dürfen höchstens etwa
   10 Sekunden auseinanderliegen; ein Zurückschreiben, das zugleich den Kennwort-Hash neu berechnet
   (Wechsel des Hash-Verfahrens), fängt nur das Zeitfenster. Kosten: je Anfrage eines angemeldeten
   Mitglieds eine Abfrage über einen Index, bei einem Widerruf in den letzten 24 Stunden eine

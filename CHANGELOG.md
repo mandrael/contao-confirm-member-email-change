@@ -4,6 +4,12 @@ Alle nennenswerten Änderungen an diesem Projekt werden hier dokumentiert.
 Das Format orientiert sich an [Keep a Changelog](https://keepachangelog.com/de/1.1.0/),
 die Versionierung folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Dokumentation
+- README: Der Reset-Schutz greift nur, solange die Zeile noch das vom Reset gespeicherte Kennwort
+  trägt, und nicht, wenn Contao nach dem Speichern und vor dem Hook mit einem Fehler abbricht.
+
 ## [1.2.1] - 2026-09-30
 
 ### Sicherheit
